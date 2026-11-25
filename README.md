@@ -1,31 +1,62 @@
 # VOMeter
 
-A loudness finisher for the end of a voice-over track: it measures the **dialogue-gated
-integrated loudness** of your VO, tells you how much trim gets it to your delivery target,
-and holds the output under **-2.5 dBTP** with a true-peak limiter. It is available as a VST3 on
-all platforms, plus an AU on macOS.
+A loudness finisher for the end of a voice-over track. It measures the **dialogue-gated
+integrated loudness** of your narration and, through a side chain, of the programme (OV)
+it sits in. **Match** lands the narration on the target, and an automatable **Trim** lets you
+ride it from there. A true-peak limiter holds the output under **-2.5 dBTP**. It is available
+as a VST3 on all platforms, plus an AU on macOS.
 
 ![VOMeter plugin window](docs/screenshot.png)
 
-Put it last on the narration track. Set the target (-24, -27, ...), play the take through
-once, press **Match**, then **Reset Meter** and play it again to confirm: the target turns
-green when the dialogue loudness is within ±2 LU of it.
+## Workflow
+
+1. Put VOMeter last on the narration track. In its **Side Chain** menu (top of the plug-in
+   window in Logic), choose the programme / OV track.
+2. **Set the target from the programme.** Press Reset Meter. Bypass anything on the OV that
+   reacts to the narration (VODucker), so the programme is measured un-ducked. Then do an
+   offline bounce of the project or section: File → Bounce → Project or Section, Mode:
+   Offline. You can throw the bounced file away. Press **Use** to take the programme's
+   dialogue loudness as the target (or type a target, or pick a preset).
+3. Press **Match**. The Match gain now lands the narration on the target with the trim at
+   0 dB. Switch VODucker back on.
+4. **Ride the trim** (automate it) through the mix: up to sit the narration over busy
+   scenes instead of ducking the programme hard, down where it's too forward. Match never
+   touches the trim or its automation.
+5. Reset and bounce again to check: the target turns green when the narration's dialogue
+   loudness is within ±2 LU of it. With rides, that's the level you deliver, rides included.
+
+**Mono narration in a stereo mix.** A mono track panned centre plays in both channels of a
+stereo mix, and BS.1770 then measures it 3 dB louder than the mono track on its own: a
+narration track reading -30 sits at -27 in the mix. On a mono track VOMeter shows a
+**STEREO MIX / 5.1 MIX** switch. In Stereo (the default) every narration reading is given
+as heard in the stereo mix, so you use the programme's own target (-27 for a -27 OV).
+In 5.1 the narration goes to the centre channel alone, so there's no offset. This assumes
+Logic's default pan law, where a centre-panned mono track stays at unity in each channel.
+With the plain "-3 dB" pan law there is no offset, so use 5.1 mode there.
+
+**How Logic's side chain works:** a side chain taken from a track is post-insert and
+pre-fader. VOMeter hears the OV after its plug-ins (including VODucker's ducking, hence the
+bypass in step 2), but not its fader. Likewise, VODucker keyed from the narration hears
+VOMeter's trim but not the narration fader. Riding VOMeter's trim up also makes VODucker
+duck harder; riding the narration fader doesn't.
 
 ## What it measures
 
 - **Dialogue loudness** follows ITU-R BS.1770 (K-weighting, 400 ms blocks every 100 ms,
   -70 LUFS absolute and -10 LU relative gates), but only blocks that a speech detector marks
   as dialogue count. Pauses, breaths, room tone and steady sounds such as tones or noise beds
-  are left out. The detector looks at level above the noise floor, the share of energy in the
-  voice band (250 Hz to 3.5 kHz) and the syllable-by-syllable movement of the level. It is
-  *not* Dolby Dialogue Intelligence (which is proprietary), so expect small differences from
-  Dolby Media Meter on mixed programme. On clean VO the two methods agree closely.
-- The meter measures both the **output** (after trim and limiter; the big readout) and the
-  **input** (before trim). The input reading gives the suggested trim, so the suggestion stays
-  valid after you move the trim.
+  are left out. The detector looks at three things: level above the noise floor, the share of
+  energy in the voice band (250 Hz to 3.5 kHz), and the syllable-by-syllable movement of the
+  level. It is *not* Dolby Dialogue Intelligence (which is proprietary), so expect small
+  differences from Dolby Media Meter or Youlean's dialogue gate on mixed programme. On clean VO
+  the methods agree closely.
+- Three measurements run at once:
+  - the narration's **output**, after gain and limiter (the big readout)
+  - the narration's **input**, before any gain (gives the Match gain)
+  - the **programme** on the side chain (gives the target)
 - It measures **only while the transport plays**, or while the host renders offline (Logic's
-  offline bounce). It runs over the whole pass (it is a true
-  integrated reading with no time window) until you press Reset Meter.
+  offline bounce). It runs over the whole pass (it is a true integrated reading with no time
+  window) until you press Reset Meter.
 - On plain BS.1770 the meter agrees with the EBU Tech 3341 test signals and with
   `ffmpeg -af ebur128` to within 0.1 LU.
 
@@ -34,19 +65,23 @@ green when the dialogue loudness is within ±2 LU of it.
 | Control | What it does |
 |---------|--------------|
 | Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). Shown in green when the output is within ±2 LU of it. |
-| Trim | Output gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
-| Match | Sets Trim to the suggested value (target minus the input's dialogue loudness), as one undoable move. |
-| Reset Meter | Clears the loudness, max true peak, LRA and speech readings. It doesn't touch the trim. |
+| Use | Sets the target to the programme's dialogue loudness from the side chain |
+| Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB. It never touches the trim. |
+| Clear | Sets the Match gain back to 0 dB |
+| Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
+| Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
+| Stereo mix / 5.1 mix | Mono tracks only: read the narration as heard in a stereo mix (+3 dB) or in a 5.1 centre channel (no offset) |
 | Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
 
 | Readout | Meaning |
 |---------|---------|
-| Dialogue loudness | Dialogue-gated integrated loudness of the output since the last reset |
+| Output dialogue | Dialogue-gated integrated loudness of the narration output since the last reset |
+| Programme | Dialogue-gated integrated loudness of the side-chain programme ("no side chain" when it's silent) |
 | Max true peak | Highest output true peak since the reset (8× oversampled) |
 | Gain reduction | How many dB the -2.5 dBTP limiter is turning the audio down right now (held briefly, then falls back). Red while it is working; "None" when it isn't |
 | LRA | Loudness range of the output (EBU Tech 3342) |
 | Speech | Share of the measured time that counted as dialogue |
-| Input dialogue / Suggested trim | Dialogue loudness before the trim, and the trim that would land it on the target (limited to ±18 dB) |
+| Input dialogue / Match gain | Dialogue loudness before any gain, the current Match gain, and what Match would set it to |
 
 **Limiter:** a stereo-linked lookahead brickwall limiter. It detects inter-sample peaks with
 8× oversampling and holds the output at -2.55 dBTP, a 0.05 dB margin so other true-peak meters
@@ -55,14 +90,12 @@ levels it does nothing until a peak would cross the ceiling.
 
 **Tips**
 
-- If you move the trim (or automate it) during a pass, the output reading mixes the
-  settings. The window says so; reset and replay for a clean number.
-- Offline bounces (Logic: Bounce with Mode: Offline) are measured just like real-time
-  playback, so you can bounce the track and read the result without playing it through.
-- If the suggested trim shows "(limit)", the take needs more than ±18 dB. Fix the gain
-  earlier in the chain.
+- If the Match gain changes during a pass, the window asks you to reset and replay. Trim rides
+  are expected; the window just notes they're included.
+- If Match shows "(limit)", the take needs more than ±24 dB. Fix the gain earlier in the chain.
 - The test tool can measure a real file and render it at a target:
-  `VOMeterTest --render take.wav -24 -27` writes `take_VOMeter-24.wav` etc. and prints the readings.
+  `VOMeterTest --render take.wav -24 -27` writes `take_VOMeter-24.wav` etc. and prints the
+  readings. Mono files are read as heard in a stereo mix.
 
 ## Install
 

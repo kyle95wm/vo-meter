@@ -39,7 +39,8 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
       targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
                         [this] (float v) { targetLabel.setText (juce::String (v, 1), juce::dontSendNotification); repaint(); }),
       trimAttachment (p.apvts, VOMeterProcessor::trimId, trimKnob),
-      bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton)
+      bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton),
+      mixAttachment (p.apvts, VOMeterProcessor::mixId, mixButton)
 {
     setLookAndFeel (&lnf);
 
@@ -70,25 +71,43 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     trimKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 22);
     trimKnob.setDoubleClickReturnValue (true, 0.0, juce::ModifierKeys::altModifier);
     trimKnob.setVelocityBasedMode (false);
-    trimKnob.setTooltip ("Output trim, -18 to +18 dB (automatable). Alt-click or double-click for 0 dB.");
+    trimKnob.setTooltip ("Your ride on top of the Match gain, -18 to +18 dB (automatable). "
+                         "0 dB = matched to the target. Alt-click or double-click for 0 dB.");
 
     addAndMakeVisible (matchButton);
     styleButton (matchButton);
-    matchButton.setTooltip ("Set the trim to the suggested value so the dialogue lands on the target.");
-    matchButton.onClick = [this] { audioProcessor.applySuggestedTrim(); };
+    matchButton.setTooltip ("Set the Match gain so the dialogue lands on the target with the trim at 0 dB. "
+                            "Your trim and its automation aren't touched.");
+    matchButton.onClick = [this] { audioProcessor.applySuggestedMatch(); };
+
+    addAndMakeVisible (clearMatchButton);
+    styleButton (clearMatchButton);
+    clearMatchButton.setTooltip ("Set the Match gain back to 0 dB.");
+    clearMatchButton.onClick = [this] { audioProcessor.clearMatch(); };
+
+    addAndMakeVisible (useProgrammeButton);
+    styleButton (useProgrammeButton);
+    useProgrammeButton.setTooltip ("Set the target to the programme's dialogue loudness (from the side chain).");
+    useProgrammeButton.onClick = [this] { audioProcessor.useProgrammeAsTarget(); };
 
     addAndMakeVisible (resetButton);
     styleButton (resetButton);
-    resetButton.setTooltip ("Clear the loudness, true-peak, LRA and speech readings. The trim is kept.");
+    resetButton.setTooltip ("Clear all readings, including the programme's. The trim and Match gain are kept.");
     resetButton.onClick = [this] { audioProcessor.requestMeterReset(); resetPending = true; repaint(); };
 
     brand::makePill (bypassButton, "ACTIVE", "BYPASSED");
     bypassButton.setTooltip ("Bypass the trim and limiter (also linked to your DAW's bypass).");
     addAndMakeVisible (bypassButton);
 
+    brand::makePill (mixButton, "STEREO MIX", "5.1 MIX");
+    mixButton.setTooltip ("Mono track only. Stereo mix: readings are given as heard in a stereo mix, 3 dB above "
+                          "the mono track on its own (centre pan, both channels at unity), so the target is the "
+                          "programme's own. 5.1 mix: the narration is in the centre channel alone, no offset.");
+    addChildComponent (mixButton);
+
     addAndMakeVisible (footer);
 
-    setSize (520, 600 - (brand::headerHeight - kTitleRowHeight) + 2);
+    setSize (520, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36);
     startTimerHz (20);
     timerCallback();
 }
@@ -162,13 +181,23 @@ void VOMeterEditor::timerCallback()
     measuredSec = r.measuredSeconds.load();
     measuring = r.measuring.load();
     trimMoved = r.trimMovedSinceReset.load();
-    suggested = audioProcessor.getSuggestedTrimDb();
+    matchMoved = r.matchMovedSinceReset.load();
+    progLufs = r.programmeDialogue.load();
+    progSignal = r.programmeSignal.load();
+    matchDb = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::matchId)->load();
+    mixOffset = r.mixOffsetDb.load();
+    if (mixButton.isVisible() != audioProcessor.isMonoTrack())
+    {
+        mixButton.setVisible (audioProcessor.isMonoTrack());
+        resized();
+    }
+    suggested = audioProcessor.getSuggestedMatchDb();
     gr = std::max (r.limiterGr.load(), gr - 1.0f);   // hold, then fall 20 dB/s
 
     if (resetPending)
     {
-        outLufs = inLufs = lra = suggested = NAN;
-        tp = -INFINITY; speechSec = measuredSec = 0.0f; trimMoved = false;
+        outLufs = inLufs = lra = suggested = progLufs = NAN;
+        tp = -INFINITY; speechSec = measuredSec = 0.0f; trimMoved = matchMoved = false;
     }
 
     const float target = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load();
@@ -176,6 +205,8 @@ void VOMeterEditor::timerCallback()
     targetLabel.setColour (juce::Label::textColourId, onTarget ? brand::good : brand::textMain);
 
     matchButton.setEnabled (! std::isnan (suggested));
+    clearMatchButton.setEnabled (std::abs (matchDb) > 0.05f);
+    useProgrammeButton.setEnabled (! std::isnan (progLufs));
     repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel));
 }
 
@@ -197,7 +228,8 @@ void VOMeterEditor::paint (juce::Graphics& g)
     const float diff = valid ? outLufs - target : 0.0f;
     const bool onTarget = valid && std::abs (diff) <= vometer::kOnTargetLU;
 
-    drawCaption (g, "DIALOGUE LOUDNESS  (OUTPUT)", bigReadout.withHeight (18));
+    drawCaption (g, mixOffset > 0.0f ? "OUTPUT DIALOGUE  (STEREO MIX)" : "OUTPUT DIALOGUE",
+                 bigReadout.withHeight (18));
     auto big = bigReadout.withTrimmedTop (18);
     const juce::Font bigFont (juce::FontOptions (54.0f, juce::Font::bold));
     const auto value = valid ? fmt (outLufs) : utf8 (kDash);
@@ -246,16 +278,29 @@ void VOMeterEditor::paint (juce::Graphics& g)
         g.drawText (text, chip, juce::Justification::centred);
     }
 
+    // Programme (sidechain) row under the status chip.
+    {
+        auto row = programmeArea;
+        drawCaption (g, "PROGRAMME", row.removeFromLeft (78));
+        row.removeFromRight (useProgrammeButton.getWidth() + 8);
+        const bool has = ! std::isnan (progLufs);
+        g.setColour (has ? brand::textMain : brand::textDim);
+        g.setFont (juce::FontOptions (has ? 15.0f : brand::captionSize, juce::Font::bold));
+        g.drawText (has ? fmt (progLufs) : (progSignal ? juce::String ("listening...") : juce::String ("no side chain")),
+                    row, juce::Justification::centredLeft);
+    }
+
     {
         juce::String hint;
-        if (trimMoved)
-            hint = utf8 ("Trim moved during this reading  \xc2\xb7  reset and replay to re-check");
+        if (matchMoved)
+            hint = utf8 ("Match gain changed during this reading  \xc2\xb7  reset and replay to re-check");
         else if (valid)
             hint = utf8 ("Green = within \xc2\xb1") + fmt (vometer::kOnTargetLU) + " LU of the target"
+                   + (trimMoved ? utf8 ("  \xc2\xb7  includes your trim rides") : juce::String())
                    + (measuring ? "" : utf8 ("  \xc2\xb7  paused"));
         else
             hint = utf8 ("Measures only while playing  \xc2\xb7  ignores pauses, breaths and room tone");
-        g.setColour (trimMoved ? brand::accent : brand::textDim);
+        g.setColour (matchMoved ? brand::accent : brand::textDim);
         g.setFont (juce::FontOptions (brand::captionSize));
         g.drawText (hint, hintArea, juce::Justification::centredLeft);
     }
@@ -297,18 +342,32 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // ---- Trim panel ---------------------------------------------------------
     drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
 
-    drawCaption (g, "INPUT DIALOGUE  (BEFORE TRIM)", inputArea.withHeight (18));
+    drawCaption (g, "INPUT DIALOGUE  (BEFORE GAIN)", inputArea.withHeight (18));
     g.setColour (std::isnan (inLufs) ? brand::textDim : brand::textMain);
     g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     g.drawText (std::isnan (inLufs) ? utf8 (kDash) : fmt (inLufs) + " LUFS", inputArea.withTrimmedTop (18), juce::Justification::centredLeft);
 
-    drawCaption (g, "SUGGESTED TRIM", suggestArea.withHeight (18));
-    g.setColour (std::isnan (suggested) ? brand::textDim : brand::accent);
-    g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    juce::String sug = std::isnan (suggested) ? utf8 (kDash) : signedDb (suggested);
-    if (! std::isnan (suggested) && std::abs (suggested) >= vometer::kTrimRangeDb - 0.01f)
-        sug += "  (limit)";
-    g.drawText (sug, suggestArea.withTrimmedTop (18), juce::Justification::centredLeft);
+    drawCaption (g, "MATCH GAIN", suggestArea.withHeight (18));
+    {
+        auto row = suggestArea.withTrimmedTop (18);
+        const juce::Font f (juce::FontOptions (24.0f, juce::Font::bold));
+        const auto text = signedDb (matchDb);
+        g.setColour (std::abs (matchDb) > 0.05f ? brand::accent : brand::textDim);
+        g.setFont (f);
+        g.drawText (text, row, juce::Justification::centredLeft);
+
+        // The suggestion, when Match would change it.
+        if (! std::isnan (suggested) && std::abs (suggested - matchDb) > 0.05f)
+        {
+            juce::String sug = "Match: " + signedDb (suggested);
+            if (std::abs (suggested) >= vometer::kMatchRangeDb - 0.01f)
+                sug += " (limit)";
+            g.setColour (brand::textDim);
+            g.setFont (juce::FontOptions (brand::captionSize, juce::Font::bold));
+            g.drawText (sug, row.withTrimmedLeft (juce::roundToInt (juce::GlyphArrangement::getStringWidth (f, text)) + 12),
+                        juce::Justification::centredLeft);
+        }
+    }
 }
 
 void VOMeterEditor::resized()
@@ -318,22 +377,35 @@ void VOMeterEditor::resized()
 
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
     area.removeFromBottom (6);
-    bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
+    {
+        auto pills = area.removeFromBottom (32);
+        if (mixButton.isVisible())
+        {
+            auto row = pills.withSizeKeepingCentre (130 * 2 + 12, 30);
+            bypassButton.setBounds (row.removeFromLeft (130));
+            mixButton.setBounds (row.removeFromRight (130));
+        }
+        else
+            bypassButton.setBounds (pills.withSizeKeepingCentre (130, 30));
+    }
     area.removeFromBottom (12);
 
     // Loudness panel
-    loudPanel = area.removeFromTop (150);
+    loudPanel = area.removeFromTop (186);
     {
         auto inner = loudPanel.reduced (16, 12);
         hintArea = inner.removeFromBottom (18);
-        auto right = inner.removeFromRight (190);
+        auto right = inner.removeFromRight (204);
         bigReadout = inner;
         targetCaption = right.removeFromTop (18);
         auto targetRow = right.removeFromTop (44);
         presetButton.setBounds (targetRow.removeFromRight (64).withSizeKeepingCentre (64, 26));
         targetLabel.setBounds (targetRow.withWidth (90));
         right.removeFromTop (6);
-        statusArea = right.removeFromTop (28).withTrimmedRight (0);
+        statusArea = right.removeFromTop (28);
+        right.removeFromTop (10);
+        programmeArea = right.removeFromTop (26);
+        useProgrammeButton.setBounds (programmeArea.withLeft (programmeArea.getRight() - 52));
     }
     area.removeFromTop (10);
 
@@ -351,8 +423,10 @@ void VOMeterEditor::resized()
         inner.removeFromTop (6);
         suggestArea = inner.removeFromTop (48);
         auto buttons = inner.removeFromBottom (30);
-        matchButton.setBounds (buttons.removeFromLeft (110));
-        buttons.removeFromLeft (10);
-        resetButton.setBounds (buttons.removeFromLeft (130));
+        matchButton.setBounds (buttons.removeFromLeft (76));
+        buttons.removeFromLeft (8);
+        clearMatchButton.setBounds (buttons.removeFromLeft (64));
+        buttons.removeFromLeft (8);
+        resetButton.setBounds (buttons.removeFromLeft (112));
     }
 }

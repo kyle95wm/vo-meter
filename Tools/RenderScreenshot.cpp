@@ -15,12 +15,18 @@ int main (int argc, char** argv)
     VOMeterProcessor processor;
 
     // Play 20 s of a voice-like demo signal (syllables and pauses) through it,
-    // press Match, then play it again, so the shot shows real readings.
+    // set the target from the side chain, press Match, ride the trim a little,
+    // then play it again, so the shot shows real readings.
     {
         const double sr = 48000.0;
-        processor.setPlayConfigDetails (2, 2, sr, 512);
+        // A mono narration track (as in Logic), with the stereo programme side chain.
+        juce::AudioProcessor::BusesLayout layout;
+        layout.inputBuses.add (juce::AudioChannelSet::mono());
+        layout.inputBuses.add (juce::AudioChannelSet::stereo());
+        layout.outputBuses.add (juce::AudioChannelSet::mono());
+        processor.setBusesLayout (layout);
         processor.prepareToPlay (sr, 512);
-        juce::AudioBuffer<float> demo (2, (int) (20.0 * sr));
+        juce::AudioBuffer<float> demo (1, (int) (20.0 * sr));
         juce::Random rng (7);
         for (int i = 0; i < demo.getNumSamples(); ++i)
         {
@@ -31,24 +37,31 @@ int main (int argc, char** argv)
                                                 * (0.6 + 0.4 * std::sin (t * 1.7));
             const double voice = 0.6 * std::sin (juce::MathConstants<double>::twoPi * 220.0 * t)
                                + 0.3 * std::sin (juce::MathConstants<double>::twoPi * 1100.0 * t);
-            const float x = (float) (0.12 * env * voice + 0.0005 * (rng.nextFloat() - 0.5f));
-            demo.setSample (0, i, x);
-            demo.setSample (1, i, x);
+            demo.setSample (0, i, (float) (0.12 * env * voice + 0.0005 * (rng.nextFloat() - 0.5f)));
         }
+        // Narration on the main input; the same shape, 6 dB hotter, as "programme" on the side chain.
+        const int total = std::max (processor.getTotalNumInputChannels(), processor.getTotalNumOutputChannels());
+        const int mainCh = processor.getMainBusNumInputChannels();
         juce::MidiBuffer midi;
         auto play = [&]
         {
-            juce::AudioBuffer<float> copy (demo);
-            for (int start = 0; start < copy.getNumSamples(); start += 512)
+            juce::AudioBuffer<float> work (total, demo.getNumSamples());
+            for (int c = 0; c < total; ++c)
             {
-                juce::AudioBuffer<float> view (copy.getArrayOfWritePointers(), 2, start, std::min (512, copy.getNumSamples() - start));
+                work.copyFrom (c, 0, demo, 0, 0, demo.getNumSamples());
+                if (c >= mainCh) work.applyGain (c, 0, demo.getNumSamples(), 2.0f);
+            }
+            for (int start = 0; start < work.getNumSamples(); start += 512)
+            {
+                juce::AudioBuffer<float> view (work.getArrayOfWritePointers(), total, start, std::min (512, work.getNumSamples() - start));
                 processor.processBlock (view, midi);
             }
         };
         play();
-        processor.applySuggestedTrim();
+        processor.useProgrammeAsTarget();
+        processor.applySuggestedMatch();
         auto* trim = processor.apvts.getParameter (VOMeterProcessor::trimId);
-        trim->setValueNotifyingHost (trim->convertTo0to1 (processor.apvts.getRawParameterValue (VOMeterProcessor::trimId)->load() + 0.6f));
+        trim->setValueNotifyingHost (trim->convertTo0to1 (1.5f));   // a ride
         processor.requestMeterReset();
         play();
     }

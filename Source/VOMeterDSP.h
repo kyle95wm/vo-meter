@@ -23,6 +23,7 @@ constexpr float kCeilingDbTP = -2.5f;        // the delivery ceiling the user as
 constexpr float kCeilingMarginDb = 0.05f;    // internal safety so other meters agree
 constexpr float kOnTargetLU = 2.0f;          // target turns green within +/- this
 constexpr float kTrimRangeDb = 18.0f;
+constexpr float kMatchRangeDb = 24.0f;      // Match gain, set by the Match button
 
 // -----------------------------------------------------------------------------
 // Double-precision biquad (RBJ cookbook), transposed direct form II.
@@ -344,8 +345,8 @@ private:
 //   * enough of its frames are "voice active": above the noise floor by 10 dB,
 //     above -60 LUFS, and with most of their energy in the voice band
 //     (250 Hz - 3.5 kHz), which rules out hum, rumble and hiss; and
-//   * its level moves the way speech does (syllables and gaps), which rules
-//     out steady sounds such as tones, room tone and noise beds.
+//   * the level of those active frames moves the way speech does (syllables),
+//     which rules out steady sounds such as tones, room tone and noise beds.
 // It's a level/spectrum/modulation heuristic, not Dolby Dialogue Intelligence.
 // -----------------------------------------------------------------------------
 class SpeechDetector
@@ -402,17 +403,33 @@ public:
             active += activeRing[(size_t) ((ringPos - i + kRing) % kRing)];
         if (active < 4) return false;
 
-        // syllabic modulation: spread of the block's own frame levels
-        const int m = kBlockFrames;
+        // Syllabic modulation, over the block's active frames only:
+        //  * their levels must spread (standard deviation >= 3 dB), and
+        //  * they must not be mostly steady (70% or more within +/-1.5 dB of
+        //    the median), so a steady sound starting or stopping part-way
+        //    through a frame doesn't look like speech.
+        std::array<float, kBlockFrames> lv {};
         double sum = 0, sq = 0;
-        for (int i = 1; i <= m; ++i)
+        int k = 0;
+        for (int i = 1; i <= kBlockFrames; ++i)
         {
-            const double v = frameDbRing[(size_t) ((ringPos - i + kRing) % kRing)];
+            const auto idx = (size_t) ((ringPos - i + kRing) % kRing);
+            if (! activeRing[idx]) continue;
+            const double v = frameDbRing[idx];
+            lv[(size_t) k++] = (float) v;
             sum += v; sq += v * v;
         }
-        const double mean = sum / m;
-        const double sd = std::sqrt (std::max (0.0, sq / m - mean * mean));
-        return sd >= 3.0;
+        const double mean = sum / k;
+        const double sd = std::sqrt (std::max (0.0, sq / k - mean * mean));
+        if (sd < 3.0) return false;
+
+        auto sorted = lv;
+        std::nth_element (sorted.begin(), sorted.begin() + k / 2, sorted.begin() + k);
+        const float median = sorted[(size_t) (k / 2)];
+        int steady = 0;
+        for (int i = 0; i < k; ++i)
+            steady += std::abs (lv[(size_t) i] - median) <= 1.5f ? 1 : 0;
+        return steady < 0.7 * k;
     }
 
 private:
@@ -551,6 +568,81 @@ private:
     LoudnessHistogram inDialogue, outDialogue, inProgramme, outProgramme, shortTerm;
     double cache[5] {};
     float tpMax = 0.0f;
+    long long hopsMeasured = 0, speechHops = 0;
+};
+// -----------------------------------------------------------------------------
+// Dialogue-gated and standard integrated loudness of one signal: the programme
+// audio arriving on the sidechain. Same blocks, gates and speech detector as
+// the narration meter.
+// -----------------------------------------------------------------------------
+class ProgrammeMeter
+{
+public:
+    ProgrammeMeter() { reset(); }
+
+    void prepare (double sr, int numChannels)   // keeps the measurement, like LoudnessMeter
+    {
+        channels = std::min (numChannels, 2);
+        hopLen = std::max (1, (int) std::round (0.1 * sr));
+        for (auto& k : kw) k.prepare (sr);
+        speech.prepare (sr);
+        restartBlocks();
+    }
+
+    void reset() noexcept
+    {
+        dialogue.reset(); full.reset();
+        hopsMeasured = 0; speechHops = 0;
+        cache[0] = cache[1] = std::numeric_limits<double>::quiet_NaN();
+    }
+
+    void restartBlocks() noexcept { acc = 0; count = 0; filled = 0; subIdx = 0; hops.fill (0.0); }
+
+    void push (const float* x, int numCh, bool measuring) noexcept
+    {
+        numCh = std::min (numCh, channels);
+        double p = 0, mono = 0;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const double k = kw[ch].process (x[ch]);
+            p += k * k;
+            mono += x[ch];
+        }
+        speech.push (p, mono / std::max (1, numCh));
+        if (! measuring) return;
+
+        acc += p;
+        if (++count < hopLen) return;
+        hops[(size_t) subIdx] = acc / hopLen;
+        subIdx = (subIdx + 1) % 4;
+        filled = std::min (filled + 1, 4);
+        acc = 0; count = 0;
+        ++hopsMeasured;
+        if (filled < 4) return;
+
+        const double block = (hops[0] + hops[1] + hops[2] + hops[3]) * 0.25;
+        full.add (block);
+        if (speech.blockIsSpeech())
+        {
+            dialogue.add (block);
+            ++speechHops;
+        }
+        cache[0] = dialogue.integrated();
+        cache[1] = full.integrated();
+    }
+
+    double dialogueLufs() const noexcept { return cache[0]; }
+    double programmeLufs() const noexcept { return cache[1]; }
+    double speechSeconds() const noexcept { return speechHops * 0.1; }
+    double measuredSeconds() const noexcept { return hopsMeasured * 0.1; }
+
+private:
+    int channels = 2, hopLen = 4800, count = 0, filled = 0, subIdx = 0;
+    double acc = 0, cache[2] {};
+    std::array<double, 4> hops {};
+    KWeighting kw[2];
+    SpeechDetector speech;
+    LoudnessHistogram dialogue, full;
     long long hopsMeasured = 0, speechHops = 0;
 };
 } // namespace vometer

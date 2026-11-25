@@ -49,30 +49,46 @@ float getParam (VOMeterProcessor& p, const char* id)
     return p.apvts.getRawParameterValue (id)->load();
 }
 
+// Main bus mono or stereo, plus the stereo programme side chain.
 std::unique_ptr<VOMeterProcessor> makeProcessor (double sr, int channels)
 {
     auto p = std::make_unique<VOMeterProcessor>();
     const auto set = channels == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
     juce::AudioProcessor::BusesLayout layout;
     layout.inputBuses.add (set);
+    layout.inputBuses.add (juce::AudioChannelSet::stereo());
     layout.outputBuses.add (set);
-    p->setBusesLayout (layout);
-    p->setPlayConfigDetails (channels, channels, sr, kBlock);
+    const bool ok = p->setBusesLayout (layout);
+    CHECK (ok, "layout with side chain should be supported");
     p->prepareToPlay (sr, kBlock);
     return p;
 }
 
-// Runs a copy of `in` through the processor and returns the output.
-Signal process (VOMeterProcessor& p, const Signal& in, int block = kBlock)
+// Runs a copy of `in` (and optionally `sideChain` on the programme input)
+// through the processor and returns the main output.
+Signal process (VOMeterProcessor& p, const Signal& in, int block = kBlock, const Signal* sideChain = nullptr)
 {
-    Signal out (in);
+    const int mainCh = in.getNumChannels();
+    const int total = std::max (p.getTotalNumInputChannels(), p.getTotalNumOutputChannels());
+    Signal work (total, in.getNumSamples());
+    work.clear();
+    for (int c = 0; c < mainCh; ++c)
+        work.copyFrom (c, 0, in, c, 0, in.getNumSamples());
+    if (sideChain != nullptr)
+        for (int c = 0; c < std::min (2, total - mainCh); ++c)
+            work.copyFrom (mainCh + c, 0, *sideChain, std::min (c, sideChain->getNumChannels() - 1), 0,
+                           std::min (in.getNumSamples(), sideChain->getNumSamples()));
+
     juce::MidiBuffer midi;
-    for (int start = 0; start < out.getNumSamples(); start += block)
+    for (int start = 0; start < work.getNumSamples(); start += block)
     {
-        const int len = std::min (block, out.getNumSamples() - start);
-        juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), out.getNumChannels(), start, len);
+        const int len = std::min (block, work.getNumSamples() - start);
+        juce::AudioBuffer<float> view (work.getArrayOfWritePointers(), total, start, len);
         p.processBlock (view, midi);
     }
+    Signal out (mainCh, in.getNumSamples());
+    for (int c = 0; c < mainCh; ++c)
+        out.copyFrom (c, 0, work, c, 0, in.getNumSamples());
     return out;
 }
 
@@ -380,9 +396,10 @@ void testNonSpeechBedIsIgnored()
 
 void testMatchHitsTarget()
 {
-    // Promise: play the take, press Match, reset, play again: the dialogue
-    // loudness of the output lands on the target (within 0.5 LU), for quiet and
-    // hot takes, at every sample rate.
+    // Promise: play the take, press Match, reset, play again: with the trim at
+    // 0 dB the dialogue loudness of the output lands on the target (within
+    // 0.5 LU), for quiet and hot takes, at every sample rate. Match sets the
+    // Match gain and leaves the trim alone.
     for (double sr : kRates)
         for (float target : { -24.0f, -27.0f, -23.0f })
             for (float peak : { -12.0f, -6.0f })
@@ -391,24 +408,89 @@ void testMatchHitsTarget()
                 setParam (*p, VOMeterProcessor::targetId, target);
                 const auto take = synthNarration (sr, 2, 30.0, peak, 5);
                 process (*p, take);
-                CHECK (p->applySuggestedTrim(), "Match should work once dialogue was heard");
+                CHECK (p->applySuggestedMatch(), "Match should work once dialogue was heard");
+                CHECK (std::abs (getParam (*p, VOMeterProcessor::trimId)) < 0.01f, "Match must not touch the trim");
                 p->requestMeterReset();
                 process (*p, take);
                 const float out = p->readings.outDialogue.load();
-                CHECK (std::abs (out - target) < 0.5f, "after Match: %.2f LUFS for target %.0f (peak %.0f dBFS, %.0f Hz, trim %+.1f)",
-                       out, target, peak, sr, getParam (*p, VOMeterProcessor::trimId));
+                CHECK (std::abs (out - target) < 0.5f, "after Match: %.2f LUFS for target %.0f (peak %.0f dBFS, %.0f Hz, match %+.1f)",
+                       out, target, peak, sr, getParam (*p, VOMeterProcessor::matchId));
                 CHECK (! p->readings.trimMovedSinceReset.load(), "trim didn't move after the reset");
             }
 }
 
-void testSuggestedTrimClamps()
+void testSuggestedMatchClamps()
 {
-    // Promise: a very quiet take suggests at most +18 dB (the trim's range).
+    // Promise: a very quiet take suggests at most +24 dB (the Match gain's range).
     auto p = makeProcessor (48000.0, 1);
-    setParam (*p, VOMeterProcessor::targetId, -16.0f);
-    process (*p, synthNarration (48000.0, 1, 15.0, -40.0f, 6));
-    const float s = p->getSuggestedTrimDb();
-    CHECK (std::abs (s - 18.0f) < 0.01f, "suggested trim %.2f should clamp to +18", s);
+    setParam (*p, VOMeterProcessor::targetId, -10.0f);
+    process (*p, synthNarration (48000.0, 1, 15.0, -30.0f, 6));
+    const float s = p->getSuggestedMatchDb();
+    CHECK (std::abs (s - 24.0f) < 0.01f, "suggested Match gain %.2f should clamp to +24", s);
+}
+
+void testTrimRidesOnTopOfMatch()
+{
+    // Promise: the trim rides on top of the Match gain. With a ride of +3 dB in
+    // place, Match still lands "trim at 0 dB" on the target, keeps the ride,
+    // and the output sits 3 LU above the target. The suggestion doesn't depend
+    // on the trim.
+    auto p = makeProcessor (48000.0, 2);
+    setParam (*p, VOMeterProcessor::targetId, -27.0f);
+    setParam (*p, VOMeterProcessor::trimId, 3.0f);
+    const auto take = synthNarration (48000.0, 2, 30.0, -12.0f, 11);
+    process (*p, take);
+    const float before = p->getSuggestedMatchDb();
+    p->applySuggestedMatch();
+    CHECK (std::abs (getParam (*p, VOMeterProcessor::trimId) - 3.0f) < 0.01f, "Match changed the trim");
+    p->requestMeterReset();
+    process (*p, take);
+    const float out = p->readings.outDialogue.load();
+    CHECK (std::abs (out - (-27.0f + 3.0f)) < 0.5f, "match + 3 dB ride read %.2f, expected about -24", out);
+    CHECK (std::abs (p->getSuggestedMatchDb() - before) < 0.2f, "suggestion moved with the trim (%.2f vs %.2f)",
+           p->getSuggestedMatchDb(), before);
+
+    p->clearMatch();
+    CHECK (std::abs (getParam (*p, VOMeterProcessor::matchId)) < 0.01f, "Clear should set Match gain to 0 dB");
+}
+
+void testProgrammeSideChain()
+{
+    // Promise: programme audio on the side chain is measured the same way as
+    // the narration (dialogue-gated), Use sets the target from it, a steady
+    // tone there never counts, and with nothing on the side chain the
+    // window can say so.
+    const double sr = 48000.0;
+    const auto narration = synthNarration (sr, 1, 20.0, -12.0f, 12);
+    const auto programmeAudio = synthNarration (sr, 2, 20.0, -9.0f, 13);
+
+    auto reference = makeProcessor (sr, 2);   // the same audio on the main input
+    process (*reference, programmeAudio);
+    const float expected = reference->readings.inDialogue.load();
+
+    auto p = makeProcessor (sr, 1);
+    process (*p, narration, kBlock, &programmeAudio);
+    const float prog = p->readings.programmeDialogue.load();
+    CHECK (std::abs (prog - expected) < 0.05f, "programme read %.2f, main meter %.2f on the same audio", prog, expected);
+    CHECK (p->readings.programmeSignal.load(), "side-chain signal should be detected");
+    CHECK (p->useProgrammeAsTarget(), "Use should work with a programme reading");
+    CHECK (std::abs (getParam (*p, VOMeterProcessor::targetId) - std::round (prog * 10.0f) / 10.0f) < 0.06f,
+           "target %.2f should be the programme's %.2f", getParam (*p, VOMeterProcessor::targetId), prog);
+
+    p->requestMeterReset();
+    process (*p, silence (1, 2 * kBlock));
+    CHECK (std::isnan (p->readings.programmeDialogue.load()), "reset should clear the programme reading");
+
+    const auto tone = sine (sr, 2, 10.0, 1000.0, -20.0f);
+    process (*p, synthNarration (sr, 1, 10.0, -12.0f, 14), kBlock, &tone);
+    CHECK (std::isnan (p->readings.programmeDialogue.load()), "a tone on the side chain was counted as dialogue (%.2f LUFS)",
+           p->readings.programmeDialogue.load());
+
+    auto none = makeProcessor (sr, 2);
+    process (*none, synthNarration (sr, 2, 5.0, -12.0f, 15));
+    CHECK (! none->readings.programmeSignal.load() && std::isnan (none->readings.programmeDialogue.load()),
+           "with a silent side chain there should be no programme signal or reading");
+    CHECK (! none->useProgrammeAsTarget(), "Use should do nothing without a programme reading");
 }
 
 void testResetClearsMeterNotTrim()
@@ -482,6 +564,39 @@ void testOfflineBounce()
     p->setPlayHead (nullptr);
 }
 
+void testMonoInStereoMix()
+{
+    // Promise: on a mono track, "Stereo mix" reads what the narration measures
+    // once it plays in both channels of a stereo mix (the same as a stereo track
+    // carrying it dual-mono), 3 dB above the mono track alone; "5.1 mix"
+    // (centre channel only) reads the mono track as it is. Match follows.
+    const double sr = 48000.0;
+    const auto mono = synthNarration (sr, 1, 20.0, -12.0f, 16);
+    const auto dual = synthNarration (sr, 2, 20.0, -12.0f, 16);
+
+    auto st = makeProcessor (sr, 2);
+    process (*st, dual);
+    auto m = makeProcessor (sr, 1);
+    process (*m, mono);
+    auto five = makeProcessor (sr, 1);
+    setParam (*five, VOMeterProcessor::mixId, 1.0f);
+    process (*five, mono);
+
+    const float s = st->readings.outDialogue.load(), a = m->readings.outDialogue.load(), b = five->readings.outDialogue.load();
+    CHECK (std::abs (a - s) < 0.02f, "mono in stereo mix read %.2f, dual-mono stereo track %.2f", a, s);
+    CHECK (std::abs ((a - b) - 3.01f) < 0.02f, "stereo vs 5.1 mix should differ by 3.01 dB (%.2f vs %.2f)", a, b);
+    CHECK (std::abs (st->readings.mixOffsetDb.load()) < 1.0e-6f, "a stereo track gets no offset");
+
+    // Matching to -27 in a stereo mix leaves the mono track itself at about -30.
+    setParam (*m, VOMeterProcessor::targetId, -27.0f);
+    m->applySuggestedMatch();
+    m->requestMeterReset();
+    process (*m, mono);
+    const float inMix = m->readings.outDialogue.load();
+    CHECK (std::abs (inMix + 27.0f) < 0.5f, "mono track matched in a stereo mix read %.2f", inMix);
+    CHECK (std::abs ((inMix - m->readings.mixOffsetDb.load()) + 30.0f) < 0.5f, "the mono track itself should be about -30");
+}
+
 void testBypass()
 {
     // Promise: Bypass gives back the input bit for bit (after the reported
@@ -504,10 +619,12 @@ void testBypass()
 
 void testStateRoundTrip()
 {
-    // Promise: trim, target and bypass come back when a session is reopened.
+    // Promise: trim, Match gain, target and bypass come back when a session is reopened.
     auto a = makeProcessor (48000.0, 2);
     setParam (*a, VOMeterProcessor::trimId, 7.5f);
     setParam (*a, VOMeterProcessor::targetId, -27.0f);
+    setParam (*a, VOMeterProcessor::matchId, 6.3f);
+    setParam (*a, VOMeterProcessor::mixId, 1.0f);
     setParam (*a, VOMeterProcessor::bypassId, 1.0f);
     juce::MemoryBlock state;
     a->getStateInformation (state);
@@ -516,6 +633,8 @@ void testStateRoundTrip()
     b->setStateInformation (state.getData(), (int) state.getSize());
     CHECK (std::abs (getParam (*b, VOMeterProcessor::trimId) - 7.5f) < 0.01f, "trim not restored");
     CHECK (std::abs (getParam (*b, VOMeterProcessor::targetId) + 27.0f) < 0.01f, "target not restored");
+    CHECK (std::abs (getParam (*b, VOMeterProcessor::matchId) - 6.3f) < 0.01f, "Match gain not restored");
+    CHECK (getParam (*b, VOMeterProcessor::mixId) > 0.5f, "Mix (5.1) not restored");
     CHECK (getParam (*b, VOMeterProcessor::bypassId) > 0.5f, "bypass not restored");
 }
 
@@ -580,22 +699,25 @@ int renderFile (const juce::File& file, std::vector<float> targets)
         setParam (*p, VOMeterProcessor::targetId, target);
         process (*p, in);
         auto& r = p->readings;
+        if (ch == 1)
+            std::printf ("  mono file, read as heard in a stereo mix (+3.01 dB)\n");
         std::printf ("  input : dialogue %.2f LUFS, programme %.2f LUFS (input meter), speech %.0f%%\n",
-                     r.inDialogue.load(), p->getMeter().inputProgrammeLufs(), 100 * r.speechSeconds.load() / r.measuredSeconds.load());
-        p->applySuggestedTrim();
+                     r.inDialogue.load(), p->getMeter().inputProgrammeLufs() + r.mixOffsetDb.load(), 100 * r.speechSeconds.load() / r.measuredSeconds.load());
+        p->applySuggestedMatch();
         p->requestMeterReset();
         float maxGr = 0;
-        Signal out (in);
-        juce::MidiBuffer midi;
-        for (int start = 0; start < out.getNumSamples(); start += kBlock)
+        Signal out (ch, in.getNumSamples());
+        for (int start = 0; start < in.getNumSamples(); start += kBlock)   // block by block, to track the limiter
         {
-            const int len = std::min (kBlock, out.getNumSamples() - start);
-            juce::AudioBuffer<float> view (out.getArrayOfWritePointers(), ch, start, len);
-            p->processBlock (view, midi);
+            const int len = std::min (kBlock, in.getNumSamples() - start);
+            Signal chunk (ch, len);
+            for (int c = 0; c < ch; ++c) chunk.copyFrom (c, 0, in, c, start, len);
+            const auto o = process (*p, chunk);
+            for (int c = 0; c < ch; ++c) out.copyFrom (c, start, o, c, 0, len);
             maxGr = std::max (maxGr, r.limiterGr.load());
         }
-        std::printf ("  target %.0f: trim %+.1f dB -> dialogue %.2f LUFS, programme %.2f LUFS, max TP %.2f dBTP (ref %.2f), LRA %.1f LU, max GR %.1f dB\n",
-                     target, getParam (*p, VOMeterProcessor::trimId), r.outDialogue.load(), r.outProgramme.load(),
+        std::printf ("  target %.0f: match %+.1f dB -> dialogue %.2f LUFS, programme %.2f LUFS, max TP %.2f dBTP (ref %.2f), LRA %.1f LU, max GR %.1f dB\n",
+                     target, getParam (*p, VOMeterProcessor::matchId), r.outDialogue.load(), r.outProgramme.load(),
                      r.maxTruePeak.load(), referenceTruePeakDb (out, -6.0f), r.lra.load(), maxGr);
 
         const auto dest = file.getSiblingFile (file.getFileNameWithoutExtension() + "_VOMeter" + juce::String ((int) target) + ".wav");
@@ -633,10 +755,13 @@ int main (int argc, char** argv)
     testDialogueMatchesProgrammeOnCleanVO();
     testNonSpeechBedIsIgnored();
     testMatchHitsTarget();
-    testSuggestedTrimClamps();
+    testSuggestedMatchClamps();
+    testTrimRidesOnTopOfMatch();
+    testProgrammeSideChain();
     testResetClearsMeterNotTrim();
     testOnlyMeasuresWhilePlaying();
     testOfflineBounce();
+    testMonoInStereoMix();
     testBypass();
     testStateRoundTrip();
     testVersionCompare();

@@ -7,10 +7,12 @@
 
 // Window layout (see CONVENTIONS.md):
 //   header   - plugin name and version (no subtitle)
-//   loudness - big dialogue-gated output LUFS, editable target (green when on target)
+//   loudness - big dialogue-gated output LUFS, editable target (green when on target),
+//              programme dialogue loudness from the sidechain + Use (as target)
 //   stats    - max true peak, limiter gain reduction, LRA, speech share
-//   trim     - Trim knob (alt-click = 0 dB), input loudness, suggested trim, Match, Reset Meter
-//   pills    - Bypass
+//   gain     - Trim knob (your ride; alt-click = 0 dB), input loudness, Match gain,
+//              Match / Clear / Reset Meter
+//   pills    - Bypass, and on mono tracks Stereo mix / 5.1 mix
 //   footer   - shared UpdateFooter
 // The shared look, plus a bipolar knob for the trim: sliders with the "bipolar"
 // property draw their value arc from 12 o'clock (0 dB) instead of from the start.
@@ -85,22 +87,24 @@ private:
     juce::Label targetLabel;
     juce::TextButton presetButton { "Presets" };
     juce::Slider trimKnob;
-    juce::TextButton matchButton { "Match" }, resetButton { "Reset Meter" };
-    juce::ToggleButton bypassButton { "Bypass" };
+    juce::TextButton matchButton { "Match" }, clearMatchButton { "Clear" }, resetButton { "Reset Meter" };
+    juce::TextButton useProgrammeButton { "Use" };
+    juce::ToggleButton bypassButton { "Bypass" }, mixButton { "Mix" };
     UpdateFooter footer;
 
     juce::ParameterAttachment targetAttachment;
     juce::AudioProcessorValueTreeState::SliderAttachment trimAttachment;
-    juce::AudioProcessorValueTreeState::ButtonAttachment bypassAttachment;
+    juce::AudioProcessorValueTreeState::ButtonAttachment bypassAttachment, mixAttachment;
 
     // Areas laid out in resized(), painted in paint().
-    juce::Rectangle<int> loudPanel, bigReadout, targetCaption, statusArea, hintArea;
+    juce::Rectangle<int> loudPanel, bigReadout, targetCaption, statusArea, programmeArea, hintArea;
     juce::Rectangle<int> statsPanel, trimPanel, trimCaption, inputArea, suggestArea;
 
     // Snapshot of the processor's readings, refreshed by the timer.
     float outLufs = NAN, inLufs = NAN, lra = NAN, tp = -INFINITY, gr = 0.0f, suggested = NAN;
-    float speechSec = 0.0f, measuredSec = 0.0f;
-    bool measuring = false, trimMoved = false, resetPending = false;
+    float speechSec = 0.0f, measuredSec = 0.0f, matchDb = 0.0f, progLufs = NAN;
+    float mixOffset = 0.0f;
+    bool measuring = false, trimMoved = false, matchMoved = false, progSignal = false, resetPending = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VOMeterEditor)
 };
