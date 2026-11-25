@@ -115,23 +115,35 @@ void VOMeterEditor::setTargetFromText (const juce::String& text)
 
 void VOMeterEditor::showPresetMenu()
 {
-    struct Preset { float lufs; const char* name; };
+    struct Preset { const char* section; float lufs; const char* name; };
     static const Preset presets[] = {
-        { -23.0f, "-23 LUFS  \xc2\xb7  EBU R128" },
-        { -24.0f, "-24 LKFS  \xc2\xb7  ATSC A/85" },
-        { -27.0f, "-27 LKFS  \xc2\xb7  Netflix dialogue" },
+        { "Broadcast", -23.0f, "-23 LUFS  \xc2\xb7  EBU R128" },
+        { "Broadcast", -24.0f, "-24 LKFS  \xc2\xb7  ATSC A/85" },
+        { "Streaming", -27.0f, "-27 LKFS  \xc2\xb7  Netflix dialogue" },
+        { "Online",    -16.0f, "-16 LUFS  \xc2\xb7  Apple Podcasts" },
+        { "Online",    -14.0f, "-14 LUFS  \xc2\xb7  Spotify / YouTube" },
     };
+    constexpr int numPresets = (int) std::size (presets);
+
     juce::PopupMenu menu;
     menu.setLookAndFeel (&lnf);
     const float current = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load();
-    int id = 1;
-    for (const auto& pr : presets)
-        menu.addItem (id++, utf8 (pr.name), true, std::abs (current - pr.lufs) < 0.05f);
+    juce::String section;
+    for (int i = 0; i < numPresets; ++i)
+    {
+        const auto& pr = presets[i];
+        if (section != pr.section)
+        {
+            section = pr.section;
+            menu.addSectionHeader (section);
+        }
+        menu.addItem (i + 1, utf8 (pr.name), true, std::abs (current - pr.lufs) < 0.05f);
+    }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
                         [this] (int result)
                         {
-                            if (result >= 1 && result <= 3)
+                            if (result >= 1 && result <= numPresets)
                                 targetAttachment.setValueAsCompleteGesture (presets[result - 1].lufs);
                         });
 }

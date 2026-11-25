@@ -33,7 +33,7 @@ green when the dialogue loudness is within ±2 LU of it.
 
 | Control | What it does |
 |---------|--------------|
-| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset: -23 (EBU R128), -24 (ATSC A/85), -27 (Netflix dialogue). Shown in green when the output is within ±2 LU of it. |
+| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). Shown in green when the output is within ±2 LU of it. |
 | Trim | Output gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
 | Match | Sets Trim to the suggested value (target minus the input's dialogue loudness), as one undoable move. |
 | Reset Meter | Clears the loudness, max true peak, LRA and speech readings. It doesn't touch the trim. |
