@@ -25,6 +25,12 @@ constexpr float kOnTargetLU = 2.0f;          // target turns green within +/- th
 constexpr float kTrimRangeDb = 18.0f;
 constexpr float kMatchRangeDb = 24.0f;      // Match gain, set by the Match button
 
+// Dialogue-gated loudness uses speech gating *instead of* the -10 LU relative
+// level gate (only the -70 LUFS absolute gate stays), as dialogue-gated meters
+// do. Applying both drops quiet speech and reads about 0.4 LU high on real VO
+// (checked against Youlean's dialogue-gated reading of the same take).
+constexpr double kNoRelativeGate = 1000.0;
+
 // -----------------------------------------------------------------------------
 // Double-precision biquad (RBJ cookbook), transposed direct form II.
 // -----------------------------------------------------------------------------
@@ -443,7 +449,9 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// The meter: fed latency-aligned input (before trim) and output frames.
+// The meter: fed latency-aligned input (before gain) and output frames.
+// Dialogue readings: speech blocks, absolute gate only. Programme readings:
+// standard BS.1770 (absolute + relative gate).
 // 400 ms blocks every 100 ms. The speech decision comes from the input (it is
 // level-independent, so the trim can't change what counts as dialogue) and is
 // shared by the input and output measurements.
@@ -543,8 +551,8 @@ private:
 
     void updateCache() noexcept
     {
-        cache[0] = outDialogue.integrated();
-        cache[1] = inDialogue.integrated();
+        cache[0] = outDialogue.integrated (kNoRelativeGate);
+        cache[1] = inDialogue.integrated (kNoRelativeGate);
         cache[2] = outProgramme.integrated();
         cache[3] = inProgramme.integrated();
         cache[4] = shortTerm.loudnessRange();
@@ -627,7 +635,7 @@ public:
             dialogue.add (block);
             ++speechHops;
         }
-        cache[0] = dialogue.integrated();
+        cache[0] = dialogue.integrated (kNoRelativeGate);
         cache[1] = full.integrated();
     }
 

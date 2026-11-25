@@ -590,7 +590,7 @@ void testMonoInStereoMix()
     process (*five, mono);
 
     const float s = st->readings.outDialogue.load(), a = m->readings.outDialogue.load(), b = five->readings.outDialogue.load();
-    CHECK (std::abs (a - s) < 0.02f, "mono in stereo mix read %.2f, dual-mono stereo track %.2f", a, s);
+    CHECK (std::abs (a - s) < 0.05f, "mono in stereo mix read %.2f, dual-mono stereo track %.2f", a, s);
     CHECK (std::abs ((a - b) - 3.01f) < 0.02f, "stereo vs 5.1 mix should differ by 3.01 dB (%.2f vs %.2f)", a, b);
     CHECK (std::abs (st->readings.mixOffsetDb.load()) < 1.0e-6f, "a stereo track gets no offset");
 

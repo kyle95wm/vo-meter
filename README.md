@@ -45,8 +45,10 @@ duck harder; riding the narration fader doesn't.
 ## What it measures
 
 - **Dialogue loudness** follows ITU-R BS.1770 (K-weighting, 400 ms blocks every 100 ms,
-  -70 LUFS absolute and -10 LU relative gates), but only blocks that a speech detector marks
-  as dialogue count. Pauses, breaths, room tone and steady sounds such as tones or noise beds
+  -70 LUFS absolute gate), but it uses speech gating instead of the -10 LU relative level
+  gate: only blocks that a speech detector marks as dialogue count. On a real VO take this
+  matches Youlean's dialogue-gated reading to within 0.1 LU. The standard integrated reading
+  and LRA keep the usual gates. Pauses, breaths, room tone and steady sounds such as tones or noise beds
   are left out. The detector looks at three things: level above the noise floor, the share of
   energy in the voice band (250 Hz to 3.5 kHz), and the syllable-by-syllable movement of the
   level. It is *not* Dolby Dialogue Intelligence (which is proprietary), so expect small
