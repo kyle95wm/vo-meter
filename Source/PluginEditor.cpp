@@ -383,7 +383,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // ---- Stats row ----------------------------------------------------------
     {
         auto row = statsPanel.reduced (14, 10);
-        const int w = row.getWidth() / 3;
+        const int w = row.getWidth() / 2;
         auto tile = [&] (const juce::String& caption, const juce::String& text, juce::Colour ink)
         {
             auto t = row.removeFromLeft (w);
@@ -393,10 +393,6 @@ void VOMeterEditor::paint (juce::Graphics& g)
             g.drawText (text, t, juce::Justification::centredLeft);
             return t;
         };
-
-        const bool tpValid = std::isfinite (tp);
-        const bool tpOver = tpValid && tp > vometer::kCeilingDbTP + 0.05f;
-        tile ("MAX TRUE PEAK", tpValid ? fmt (tp) + " dBTP" : utf8 (kDash), tpOver ? brand::warn : (tpValid ? brand::textMain : brand::textDim));
 
         tile ("LRA", std::isnan (lra) ? utf8 (kDash) : fmt (lra) + " LU", std::isnan (lra) ? brand::textDim : brand::textMain);
 
@@ -500,8 +496,8 @@ void VOMeterEditor::resized()
 
 // The meter strip: output sample peak per channel (dBFS, -60 to 0, with the
 // limiter's ceiling and a peak-hold line) and the limiter's gain reduction
-// (0 to 12 dB, growing down from the top). Numbers underneath: the highest
-// held peak and the gain reduction right now.
+// (0 to 12 dB, growing down from the top). Numbers underneath: the max true
+// peak since Reset Meter, and the gain reduction right now.
 void VOMeterEditor::drawMeters (juce::Graphics& g)
 {
     auto inner = meterPanel.reduced (10, 12);
@@ -538,7 +534,6 @@ void VOMeterEditor::drawMeters (juce::Graphics& g)
     // Level bars.
     const int gap = meterChannels > 2 ? 2 : 4;
     const float barW = (float) (levels.getWidth() - gap * (meterChannels - 1)) / (float) meterChannels;
-    float maxHold = -100.0f;
     for (int c = 0; c < meterChannels; ++c)
     {
         const auto bar = juce::Rectangle<float> ((float) levels.getX() + c * (barW + gap), (float) levels.getY(), barW, (float) levels.getHeight());
@@ -554,7 +549,6 @@ void VOMeterEditor::drawMeters (juce::Graphics& g)
             g.setColour (brand::textMain);
             g.fillRect (bar.withTop (yFor (holdDb[c]) - 1.0f).withHeight (2.0f));
         }
-        maxHold = std::max (maxHold, holdDb[c]);
     }
 
     // The limiter's ceiling.
@@ -585,6 +579,9 @@ void VOMeterEditor::drawMeters (juce::Graphics& g)
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.drawText (value, row, juce::Justification::centredRight);
     };
-    line ("PEAK", maxHold > kMeterFloorDb ? fmt (maxHold) : utf8 (kDash), maxHold > kMeterFloorDb ? brand::textMain : brand::textDim);
+    // Whole-pass max true peak since Reset Meter (the deliverable figure).
+    const bool tpValid = std::isfinite (tp);
+    const bool tpOver = tpValid && tp > vometer::kCeilingDbTP + 0.05f;
+    line ("TP MAX", tpValid ? fmt (tp) : utf8 (kDash), tpOver ? brand::warn : (tpValid ? brand::textMain : brand::textDim));
     line ("GR", gr > 0.05f ? "-" + fmt (gr) : juce::String ("0.0"), gr > 0.05f ? brand::warn : brand::textDim);
 }

@@ -10,9 +10,10 @@
 //   loudness - big output LUFS (dialogue-gated, or integrated when mastering a mix),
 //              editable target (green when on target), programme loudness from
 //              the sidechain + Use (as target; mono narration tracks only)
-//   stats    - max true peak, LRA, speech share
+//   stats    - LRA, speech share
 //   meters   - strip down the right: output peak per channel (with the -2.5 dBTP
-//              ceiling and a peak hold) and the limiter's gain reduction
+//              ceiling and a peak hold) and the limiter's gain reduction, with
+//              the max true peak since reset and the gain reduction as numbers
 //   gain     - Trim knob (your ride; alt-click = 0 dB), input loudness, Match gain,
 //              Match / Clear / Reset Meter
 //   pills    - Bypass

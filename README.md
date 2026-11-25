@@ -100,8 +100,7 @@ duck harder; riding the narration fader doesn't.
 |---------|---------|
 | Output dialogue (or integrated) | Loudness of the output since the last reset: dialogue-gated, or integrated in Integrated mode |
 | Programme | Dialogue loudness of the side-chain programme, with **Use** to take it as the target. Mono narration tracks only (a full mix has no programme to follow), and hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
-| Max true peak | Highest output true peak since the reset (8× oversampled) |
-| Level meter (OUT) | Output sample peak of each channel (1, 2 or 6 bars), -60 to 0 dBFS, with a peak-hold line and the -2.5 dBTP ceiling marked in red. PEAK underneath is the highest held peak. Runs whether or not the transport plays |
+| Level meter (OUT) | Output sample peak of each channel (1, 2 or 6 bars), -60 to 0 dBFS, with a peak-hold line and the -2.5 dBTP ceiling marked in red. TP MAX underneath is the highest true peak since Reset Meter (8× oversampled), the figure to check against a delivery spec; red if it ever went over the ceiling. The bars run whether or not the transport plays; TP MAX, like the loudness, only measures while playing or bouncing |
 | Gain reduction meter (GR) | How far the -2.5 dBTP limiter is turning the audio down right now, 0 to 12 dB, growing down from the top (falls back at 20 dB/s). GR underneath gives the number |
 | LRA | Loudness range of the output (EBU Tech 3342) |
 | Speech | Share of the measured time that counted as dialogue |
