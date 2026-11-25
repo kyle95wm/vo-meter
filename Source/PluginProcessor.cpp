@@ -167,6 +167,23 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             for (int c = 0; c < numSc; ++c)
                 scPtr[c] = sc.getReadPointer (c);
         }
+    // Logic feeds the track's own audio into the side chain when its Side
+    // Chain menu says "None". A side chain that is a copy of our input isn't
+    // programme audio: ignore it.
+    if (numSc > 0)
+    {
+        bool copyOfInput = numCh > 0;
+        for (int c = 0; c < numSc && copyOfInput; ++c)
+        {
+            const float* a = scPtr[c];
+            const float* b = mainBus.getReadPointer (std::min (c, numCh - 1));
+            for (int i = 0; i < n; ++i)
+                if (! juce::exactlyEqual (a[i], b[i])) { copyOfInput = false; break; }
+        }
+        if (copyOfInput)
+            numSc = 0;
+    }
+
     if (numSc > 0)
     {
         float peak = 0.0f;

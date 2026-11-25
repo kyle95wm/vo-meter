@@ -77,7 +77,7 @@ duck harder; riding the narration fader doesn't.
 | Readout | Meaning |
 |---------|---------|
 | Output dialogue | Dialogue-gated integrated loudness of the narration output since the last reset |
-| Programme | Dialogue-gated integrated loudness of the side-chain programme ("no side chain" when it's silent) |
+| Programme | Dialogue-gated integrated loudness of the side-chain programme. Hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
 | Max true peak | Highest output true peak since the reset (8× oversampled) |
 | Gain reduction | How many dB the -2.5 dBTP limiter is turning the audio down right now (held briefly, then falls back). Red while it is working; "None" when it isn't |
 | LRA | Loudness range of the output (EBU Tech 3342) |

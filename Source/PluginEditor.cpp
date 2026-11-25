@@ -84,7 +84,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     clearMatchButton.setTooltip ("Set the Match gain back to 0 dB.");
     clearMatchButton.onClick = [this] { audioProcessor.clearMatch(); };
 
-    addAndMakeVisible (useProgrammeButton);
+    addChildComponent (useProgrammeButton);
     styleButton (useProgrammeButton);
     useProgrammeButton.setTooltip ("Set the target to the programme's dialogue loudness (from the side chain).");
     useProgrammeButton.onClick = [this] { audioProcessor.useProgrammeAsTarget(); };
@@ -218,6 +218,9 @@ void VOMeterEditor::timerCallback()
 
     matchButton.setEnabled (! std::isnan (suggested));
     clearMatchButton.setEnabled (std::abs (matchDb) > 0.05f);
+    // The programme row only appears once a side chain brings programme audio.
+    const bool showProgramme = progSignal || ! std::isnan (progLufs);
+    useProgrammeButton.setVisible (showProgramme);
     useProgrammeButton.setEnabled (! std::isnan (progLufs));
     repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel));
 }
@@ -289,7 +292,8 @@ void VOMeterEditor::paint (juce::Graphics& g)
         g.drawText (text, chip, juce::Justification::centred);
     }
 
-    // Programme (sidechain) row under the status chip.
+    // Programme (side-chain) row under the status chip, once there is programme audio.
+    if (useProgrammeButton.isVisible())
     {
         auto row = programmeArea;
         drawCaption (g, "PROGRAMME", row.removeFromLeft (78));
@@ -297,7 +301,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
         const bool has = ! std::isnan (progLufs);
         g.setColour (has ? brand::textMain : brand::textDim);
         g.setFont (juce::FontOptions (has ? 15.0f : brand::captionSize, juce::Font::bold));
-        g.drawText (has ? fmt (progLufs) : (progSignal ? juce::String ("listening...") : juce::String ("no side chain")),
+        g.drawText (has ? fmt (progLufs) : juce::String ("listening..."),
                     row, juce::Justification::centredLeft);
     }
 

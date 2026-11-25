@@ -491,6 +491,13 @@ void testProgrammeSideChain()
     CHECK (! none->readings.programmeSignal.load() && std::isnan (none->readings.programmeDialogue.load()),
            "with a silent side chain there should be no programme signal or reading");
     CHECK (! none->useProgrammeAsTarget(), "Use should do nothing without a programme reading");
+
+    // Logic, Side Chain "None": the side chain carries a copy of the track's own
+    // audio. That must not be measured as programme.
+    auto copy = makeProcessor (sr, 1);
+    process (*copy, narration, kBlock, &narration);
+    CHECK (! copy->readings.programmeSignal.load() && std::isnan (copy->readings.programmeDialogue.load()),
+           "a side chain that copies the input was measured as programme (%.2f)", copy->readings.programmeDialogue.load());
 }
 
 void testResetClearsMeterNotTrim()
