@@ -272,12 +272,14 @@ bool VOMeterProcessor::applySuggestedMatch()
     if (std::isnan (g))
         return false;
     setAsGesture (apvts.getParameter (matchId), g);
+    requestMeterReset();  // the old readings were taken at the old gain
     return true;
 }
 
 void VOMeterProcessor::clearMatch()
 {
     setAsGesture (apvts.getParameter (matchId), 0.0f);
+    requestMeterReset();
 }
 
 static const juce::Identifier mixChosenProp { "mixChosen" };

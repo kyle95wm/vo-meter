@@ -82,6 +82,7 @@ public:
     // (with the trim at 0 dB), or NaN before there's a reading.
     float getSuggestedMatchDb() const noexcept;
     // Sets Match Gain to the suggestion (one undoable gesture). Never touches the trim.
+    // Both reset the meter (not the trim or target), since a gain change makes the readings stale.
     bool applySuggestedMatch();
     void clearMatch();
     // Sets the target to the programme's dialogue loudness (sidechain).

@@ -76,13 +76,13 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     addAndMakeVisible (matchButton);
     styleButton (matchButton);
     matchButton.setTooltip ("Set the Match gain so the dialogue lands on the target with the trim at 0 dB. "
-                            "Your trim and its automation aren't touched.");
-    matchButton.onClick = [this] { audioProcessor.applySuggestedMatch(); };
+                            "Resets the meter; your trim and its automation aren't touched.");
+    matchButton.onClick = [this] { if (audioProcessor.applySuggestedMatch()) { resetPending = true; repaint(); } };
 
     addAndMakeVisible (clearMatchButton);
     styleButton (clearMatchButton);
-    clearMatchButton.setTooltip ("Set the Match gain back to 0 dB.");
-    clearMatchButton.onClick = [this] { audioProcessor.clearMatch(); };
+    clearMatchButton.setTooltip ("Set the Match gain back to 0 dB and reset the meter.");
+    clearMatchButton.onClick = [this] { audioProcessor.clearMatch(); resetPending = true; repaint(); };
 
     addChildComponent (useProgrammeButton);
     styleButton (useProgrammeButton);

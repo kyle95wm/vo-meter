@@ -18,11 +18,11 @@ as a VST3 on all platforms, plus an AU on macOS.
    Offline. You can throw the bounced file away. Press **Use** to take the programme's
    dialogue loudness as the target (or type a target, or pick a preset).
 3. Press **Match**. The Match gain now lands the narration on the target with the trim at
-   0 dB. Switch VODucker back on.
+   0 dB, and the meter resets for the next pass. Switch VODucker back on.
 4. **Ride the trim** (automate it) through the mix: up to sit the narration over busy
    scenes instead of ducking the programme hard, down where it's too forward. Match never
    touches the trim or its automation.
-5. Reset and bounce again to check: the target turns green when the narration's dialogue
+5. Bounce again to check (reset first if you've played since Match): the target turns green when the narration's dialogue
    loudness is within ±2 LU of it. With rides, that's the level you deliver, rides included.
 
 **Mono narration in a stereo mix.** A mono track panned centre plays in both channels of a
@@ -70,8 +70,8 @@ duck harder; riding the narration fader doesn't.
 |---------|--------------|
 | Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). On mono tracks it also has a Mix section (Stereo / 5.1). Shown in green when the output is within ±2 LU of it. |
 | Use | Sets the target to the programme's dialogue loudness from the side chain |
-| Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB. It never touches the trim. |
-| Clear | Sets the Match gain back to 0 dB |
+| Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB, then resets the meter. It never touches the trim. |
+| Clear | Sets the Match gain back to 0 dB and resets the meter |
 | Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
 | Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
 | Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |

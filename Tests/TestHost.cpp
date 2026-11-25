@@ -452,6 +452,17 @@ void testTrimRidesOnTopOfMatch()
 
     p->clearMatch();
     CHECK (std::abs (getParam (*p, VOMeterProcessor::matchId)) < 0.01f, "Clear should set Match gain to 0 dB");
+    process (*p, silence (2, kBlock));
+    CHECK (std::isnan (p->readings.outDialogue.load()), "Clear should reset the meter");
+    CHECK (std::abs (getParam (*p, VOMeterProcessor::trimId) - 3.0f) < 0.01f, "Clear changed the trim");
+
+    // Match resets the meter too (the readings were taken at the old gain), but not the trim.
+    process (*p, take);
+    CHECK (p->applySuggestedMatch(), "Match should work after replaying");
+    process (*p, silence (2, kBlock));
+    CHECK (std::isnan (p->readings.outDialogue.load()) && std::isnan (p->readings.inDialogue.load()),
+           "Match should reset the meter");
+    CHECK (std::abs (getParam (*p, VOMeterProcessor::trimId) - 3.0f) < 0.01f, "Match changed the trim");
 }
 
 void testProgrammeSideChain()
