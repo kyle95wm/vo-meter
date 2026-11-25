@@ -7,14 +7,16 @@
 
 // Window layout (see CONVENTIONS.md):
 //   header   - plugin name and version (no subtitle)
-//   loudness - big dialogue-gated output LUFS, editable target (green when on target),
-//              programme dialogue loudness from the sidechain + Use (as target)
+//   loudness - big output LUFS (dialogue-gated, or integrated when mastering a mix),
+//              editable target (green when on target), programme loudness from
+//              the sidechain + Use (as target)
 //   stats    - max true peak, limiter gain reduction, LRA, speech share
 //   gain     - Trim knob (your ride; alt-click = 0 dB), input loudness, Match gain,
 //              Match / Clear / Reset Meter
 //   pills    - Bypass
-// On a mono track, a one-time question ("stereo or 5.1 mix?") covers the body
-// until it's answered; the answer can be changed later in the Presets menu.
+// A one-time question covers the body until it's answered: "stereo or 5.1 mix?"
+// on a mono track, "dialogue-gated or integrated?" on a stereo or 5.1 track.
+// Either answer can be changed later in the Presets menu.
 //   footer   - shared UpdateFooter
 // The shared look, plus a bipolar knob for the trim: sliders with the "bipolar"
 // property draw their value arc from 12 o'clock (0 dB) instead of from the start.
@@ -69,24 +71,31 @@ public:
     }
 };
 
-// The one-time "stereo or 5.1 mix?" question for mono tracks.
-class MixQuestion : public juce::Component
+// A one-time two-choice question that covers the body until it's answered:
+// "stereo or 5.1 mix?" on mono tracks, "dialogue-gated or integrated?" on
+// stereo and 5.1 tracks. The first choice is the highlighted default.
+class ChoiceQuestion : public juce::Component
 {
 public:
-    std::function<void (bool fiveOne)> onAnswer;
+    std::function<void (bool second)> onAnswer;
 
-    MixQuestion()
+    ChoiceQuestion (const juce::String& id, const juce::String& titleText, const juce::String& bodyText,
+                    const juce::String& firstText, const juce::String& secondText)
+        : title (titleText), body (bodyText)
     {
-        for (auto* b : { &stereo, &fiveOne })
+        setComponentID (id);
+        first.setButtonText (firstText);
+        second.setButtonText (secondText);
+        for (auto* b : { &first, &second })
         {
             b->setColour (juce::TextButton::buttonColourId, brand::track);
             b->setColour (juce::TextButton::textColourOffId, brand::textMain);
             addAndMakeVisible (*b);
         }
-        stereo.setColour (juce::TextButton::buttonColourId, brand::accent);
-        stereo.setColour (juce::TextButton::textColourOffId, brand::bg);
-        stereo.onClick = [this] { if (onAnswer) onAnswer (false); };
-        fiveOne.onClick = [this] { if (onAnswer) onAnswer (true); };
+        first.setColour (juce::TextButton::buttonColourId, brand::accent);
+        first.setColour (juce::TextButton::textColourOffId, brand::bg);
+        first.onClick = [this] { if (onAnswer) onAnswer (false); };
+        second.onClick = [this] { if (onAnswer) onAnswer (true); };
     }
 
     void paint (juce::Graphics& g) override
@@ -97,26 +106,24 @@ public:
         auto r = card.reduced (24, 22);
         g.setColour (brand::textMain);
         g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-        g.drawText ("Is this mix stereo or 5.1?", r.removeFromTop (28), juce::Justification::centred);
+        g.drawText (title, r.removeFromTop (28), juce::Justification::centred);
         r.removeFromTop (8);
         g.setColour (brand::textDim);
         g.setFont (juce::FontOptions (13.0f));
-        g.drawFittedText ("A mono narration measures 3 dB louder in a stereo mix than in a 5.1 centre channel. "
-                          "VOMeter reads it the way your mix will, so you can use the programme's own target. "
-                          "You can change this later in the Presets menu.",
-                          r.removeFromTop (76), juce::Justification::centredTop, 5);
+        g.drawFittedText (body, r.removeFromTop (76), juce::Justification::centredTop, 5);
     }
 
     void resized() override
     {
         card = getLocalBounds().withSizeKeepingCentre (std::min (420, getWidth() - 20), 210);
         auto row = card.reduced (24, 22).removeFromBottom (36).withSizeKeepingCentre (2 * 150 + 16, 36);
-        stereo.setBounds (row.removeFromLeft (150));
-        fiveOne.setBounds (row.removeFromRight (150));
+        first.setBounds (row.removeFromLeft (150));
+        second.setBounds (row.removeFromRight (150));
     }
 
 private:
-    juce::TextButton stereo { "Stereo mix" }, fiveOne { "5.1 mix" };
+    juce::String title, body;
+    juce::TextButton first, second;
     juce::Rectangle<int> card;
 };
 
@@ -143,7 +150,7 @@ private:
     juce::TextButton matchButton { "Match" }, clearMatchButton { "Clear" }, resetButton { "Reset Meter" };
     juce::TextButton useProgrammeButton { "Use" };
     juce::ToggleButton bypassButton { "Bypass" };
-    MixQuestion mixQuestion;
+    ChoiceQuestion mixQuestion, measureQuestion;
     UpdateFooter footer;
 
     juce::ParameterAttachment targetAttachment;
@@ -157,7 +164,7 @@ private:
     // Snapshot of the processor's readings, refreshed by the timer.
     float outLufs = NAN, inLufs = NAN, lra = NAN, tp = -INFINITY, gr = 0.0f, suggested = NAN;
     float speechSec = 0.0f, measuredSec = 0.0f, matchDb = 0.0f, progLufs = NAN;
-    bool measuring = false, trimMoved = false, matchMoved = false, progSignal = false, resetPending = false;
+    bool integrated = false, measuring = false, trimMoved = false, matchMoved = false, progSignal = false, resetPending = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VOMeterEditor)
 };

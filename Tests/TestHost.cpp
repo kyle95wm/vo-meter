@@ -49,11 +49,12 @@ float getParam (VOMeterProcessor& p, const char* id)
     return p.apvts.getRawParameterValue (id)->load();
 }
 
-// Main bus mono or stereo, plus the stereo programme side chain.
+// Main bus mono, stereo or 5.1 (L R C LFE Ls Rs), plus the stereo programme side chain.
 std::unique_ptr<VOMeterProcessor> makeProcessor (double sr, int channels)
 {
     auto p = std::make_unique<VOMeterProcessor>();
-    const auto set = channels == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
+    const auto set = channels == 1 ? juce::AudioChannelSet::mono()
+                   : channels == 6 ? juce::AudioChannelSet::create5point1() : juce::AudioChannelSet::stereo();
     juce::AudioProcessor::BusesLayout layout;
     layout.inputBuses.add (set);
     layout.inputBuses.add (juce::AudioChannelSet::stereo());
@@ -626,10 +627,8 @@ void testMixQuestion()
    #endif
     auto questionShown = [] (juce::AudioProcessorEditor& e)
     {
-        for (auto* c : e.getChildren())
-            if (dynamic_cast<MixQuestion*> (c) != nullptr)
-                return c->isVisible();
-        return false;
+        auto* c = e.findChildWithID ("mixQuestion");
+        return c != nullptr && c->isVisible();
     };
 
     auto mono = makeProcessor (48000.0, 1);
@@ -653,7 +652,135 @@ void testMixQuestion()
 
     auto stereo = makeProcessor (48000.0, 2);
     std::unique_ptr<juce::AudioProcessorEditor> e (stereo->createEditor());
-    CHECK (! questionShown (*e), "a stereo track should never ask");
+    CHECK (! questionShown (*e), "a stereo track should never ask about the mix");
+}
+
+void testMeasureQuestion()
+{
+    // Promise: stereo and 5.1 tracks ask once whether to measure dialogue-gated
+    // or integrated loudness; the answer is saved with the session. Mono tracks
+    // (narration) never ask and always measure dialogue.
+   #if JUCE_LINUX
+    if (juce::SystemStats::getEnvironmentVariable ("DISPLAY", {}).isEmpty())
+        return;
+   #endif
+    auto shown = [] (VOMeterProcessor& p, const char* id)
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditor());
+        auto* c = e->findChildWithID (id);
+        return c != nullptr && c->isVisible();
+    };
+    for (int ch : { 2, 6 })
+    {
+        auto p = makeProcessor (48000.0, ch);
+        CHECK (shown (*p, "measureQuestion"), "a %d-channel track should ask dialogue-gated or integrated", ch);
+        CHECK (! shown (*p, "mixQuestion"), "a %d-channel track shouldn't ask stereo or 5.1", ch);
+        p->setMeasureMode (true);
+        CHECK (p->isIntegratedMode() && ! shown (*p, "measureQuestion"), "answering should set the mode and close the question");
+
+        juce::MemoryBlock state;
+        p->getStateInformation (state);
+        auto reopened = makeProcessor (48000.0, ch);
+        reopened->setStateInformation (state.getData(), (int) state.getSize());
+        CHECK (reopened->isMeasureModeChosen() && reopened->isIntegratedMode(), "the measure answer should be saved");
+    }
+    auto mono = makeProcessor (48000.0, 1);
+    CHECK (! shown (*mono, "measureQuestion"), "a mono track shouldn't ask what to measure");
+}
+
+void testIntegratedMode()
+{
+    // Promise: in Integrated mode the readout, the Match gain and Use follow
+    // standard BS.1770 integrated loudness of the whole signal (music and effects
+    // included), not just the dialogue. Mono tracks stay dialogue-gated.
+    const double sr = 48000.0;
+    // Narration, then a louder music sting: the integrated level includes the sting.
+    const auto mixSig = concat ({ synthNarration (sr, 2, 20.0, -14.0f, 21), sine (sr, 2, 10.0, 440.0, -16.0f) });
+
+    auto p = makeProcessor (sr, 2);
+    p->setMeasureMode (true);
+    process (*p, mixSig);
+    const auto& r = p->readings;
+    CHECK (r.integratedMode.load(), "integrated mode should be reported");
+    CHECK (std::abs (r.outLoudness.load() - r.outProgramme.load()) < 1.0e-4f, "integrated readout %.2f should be the BS.1770 integrated %.2f",
+           r.outLoudness.load(), r.outProgramme.load());
+    CHECK (std::abs (r.outLoudness.load() - r.outDialogue.load()) > 0.3f, "test signal should read differently gated (%.2f vs %.2f)",
+           r.outLoudness.load(), r.outDialogue.load());
+
+    setParam (*p, VOMeterProcessor::targetId, -23.0f);
+    CHECK (p->applySuggestedMatch(), "Match should work in integrated mode");
+    process (*p, mixSig);
+    CHECK (std::abs (r.outLoudness.load() + 23.0f) < 0.3f, "Match in integrated mode read %.2f, expected -23", r.outLoudness.load());
+
+    // Programme on the side chain: Use takes its integrated loudness.
+    auto q = makeProcessor (sr, 2);
+    q->setMeasureMode (true);
+    const auto narration = synthNarration (sr, 2, 30.0, -10.0f, 22);
+    process (*q, narration, kBlock, &mixSig);
+    CHECK (std::abs (q->readings.programmeLoudness.load() - q->readings.programmeDialogue.load()) > 0.3f,
+           "programme should read integrated, not dialogue-gated");
+    CHECK (q->useProgrammeAsTarget(), "Use should work");
+    CHECK (std::abs (getParam (*q, VOMeterProcessor::targetId) - q->readings.programmeLoudness.load()) < 0.06f,
+           "Use should take the programme's integrated loudness");
+
+    // Mono: the measure parameter is ignored.
+    auto m = makeProcessor (sr, 1);
+    setParam (*m, VOMeterProcessor::measureId, 1.0f);
+    const auto monoTake = synthNarration (sr, 1, 20.0, -12.0f, 23);
+    process (*m, monoTake);
+    CHECK (! m->readings.integratedMode.load() && std::abs (m->readings.outLoudness.load() - m->readings.outDialogue.load()) < 1.0e-4f,
+           "a mono track should stay dialogue-gated");
+}
+
+void testFiveOne()
+{
+    // Promise: on a 5.1 track, loudness uses the BS.1770 channel weights (front
+    // channels 1.0, surrounds +1.5 dB, LFE not counted), the limiter holds every
+    // channel under -2.5 dBTP, and 0 dB is transparent.
+    const double sr = 48000.0;
+    auto toneIn = [&] (int channel, float dbfs)
+    {
+        auto s = silence (6, (int) (sr * 10.0));
+        const auto t = sine (sr, 1, 10.0, 1000.0, dbfs);
+        s.copyFrom (channel, 0, t, 0, 0, t.getNumSamples());
+        auto p = makeProcessor (sr, 6);
+        process (*p, s);
+        return p->readings.outProgramme.load();
+    };
+    const float left = toneIn (0, -20.0f), centre = toneIn (2, -20.0f), surround = toneIn (4, -20.0f), lfe = toneIn (3, -20.0f);
+    CHECK (std::abs (left - centre) < 0.05f, "L and C should weigh the same (%.2f vs %.2f)", left, centre);
+    CHECK (std::abs ((surround - left) - 1.49f) < 0.05f, "a surround should read 1.5 dB above a front channel (%.2f vs %.2f)", surround, left);
+    CHECK (std::isnan (lfe) || lfe < -69.0f, "the LFE shouldn't be measured (%.2f)", lfe);
+    // Stereo reference: one channel of a stereo track at -20 dBFS reads the same as L of 5.1.
+    {
+        auto s = silence (2, (int) (sr * 10.0));
+        const auto t = sine (sr, 1, 10.0, 1000.0, -20.0f);
+        s.copyFrom (0, 0, t, 0, 0, t.getNumSamples());
+        auto p = makeProcessor (sr, 2);
+        process (*p, s);
+        CHECK (std::abs (p->readings.outProgramme.load() - left) < 0.05f, "5.1 L should read like stereo L");
+    }
+
+    auto p = makeProcessor (sr, 6);
+    const int lat = p->getLatencySamples();
+    auto in = silence (6, (int) (sr * 3.0));
+    for (int c = 0; c < 6; ++c)
+    {
+        const auto v = synthNarration (sr, 1, 3.0, -10.0f, 30 + c);
+        in.copyFrom (c, 0, v, 0, 0, in.getNumSamples());
+    }
+    const auto out = process (*p, in);
+    float err = 0;
+    for (int c = 0; c < 6; ++c)
+        for (int i = lat; i < in.getNumSamples(); ++i)
+            err = std::max (err, std::abs (out.getSample (c, i) - in.getSample (c, i - lat)));
+    CHECK (err < 1.0e-6f, "0 dB should be transparent on 5.1 (err %g)", err);
+
+    auto hot = makeProcessor (sr, 6);
+    setParam (*hot, VOMeterProcessor::trimId, 18.0f);
+    const auto hotOut = process (*hot, in);
+    const float tp = referenceTruePeakDb (hotOut, -6.0f);
+    CHECK (tp <= -2.5f, "5.1 true peak %.3f dBTP above -2.5", tp);
 }
 
 void testBypass()
@@ -684,6 +811,7 @@ void testStateRoundTrip()
     setParam (*a, VOMeterProcessor::targetId, -27.0f);
     setParam (*a, VOMeterProcessor::matchId, 6.3f);
     setParam (*a, VOMeterProcessor::mixId, 1.0f);
+    setParam (*a, VOMeterProcessor::measureId, 1.0f);
     setParam (*a, VOMeterProcessor::bypassId, 1.0f);
     juce::MemoryBlock state;
     a->getStateInformation (state);
@@ -694,6 +822,7 @@ void testStateRoundTrip()
     CHECK (std::abs (getParam (*b, VOMeterProcessor::targetId) + 27.0f) < 0.01f, "target not restored");
     CHECK (std::abs (getParam (*b, VOMeterProcessor::matchId) - 6.3f) < 0.01f, "Match gain not restored");
     CHECK (getParam (*b, VOMeterProcessor::mixId) > 0.5f, "Mix (5.1) not restored");
+    CHECK (getParam (*b, VOMeterProcessor::measureId) > 0.5f, "Measure (integrated) not restored");
     CHECK (getParam (*b, VOMeterProcessor::bypassId) > 0.5f, "bypass not restored");
 }
 
@@ -826,6 +955,9 @@ int main (int argc, char** argv)
     testVersionCompare();
     testEditorAndAltClick();
     testMixQuestion();
+    testMeasureQuestion();
+    testIntegratedMode();
+    testFiveOne();
 
     if (failures == 0)
         std::printf ("All VOMeter tests passed.\n");

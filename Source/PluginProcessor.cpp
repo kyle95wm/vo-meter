@@ -11,9 +11,10 @@ VOMeterProcessor::VOMeterProcessor()
     trimParam = apvts.getRawParameterValue (trimId);
     matchParam = apvts.getRawParameterValue (matchId);
     mixParam = apvts.getRawParameterValue (mixId);
+    measureParam = apvts.getRawParameterValue (measureId);
     targetParam = apvts.getRawParameterValue (targetId);
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (bypassId));
-    jassert (trimParam != nullptr && matchParam != nullptr && mixParam != nullptr && targetParam != nullptr && bypassParam != nullptr);
+    jassert (trimParam != nullptr && matchParam != nullptr && mixParam != nullptr && measureParam != nullptr && targetParam != nullptr && bypassParam != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout VOMeterProcessor::createLayout()
@@ -53,6 +54,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout VOMeterProcessor::createLayo
         juce::ParameterID { mixId, 1 }, "Mix", juce::StringArray { "Stereo", "5.1" }, 0,
         juce::AudioParameterChoiceAttributes().withAutomatable (false)));
 
+    // Added in 0.3.0. On stereo and 5.1 tracks: what the target applies to.
+    // Dialogue-gated for narration; integrated (standard BS.1770) to master a mix.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { measureId, 1 }, "Measure", juce::StringArray { "Dialogue", "Integrated" }, 0,
+        juce::AudioParameterChoiceAttributes().withAutomatable (false)));
+
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { targetId, 1 }, "Target",
         juce::NormalisableRange<float> (-36.0f, -10.0f, 0.1f), -24.0f,
@@ -70,26 +77,57 @@ juce::AudioProcessorValueTreeState::ParameterLayout VOMeterProcessor::createLayo
 
 bool VOMeterProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
+    // Mono, stereo and 5.1 (any 6-channel 5.1 ordering the host names; a bare
+    // 6-channel layout is taken as L R C LFE Ls Rs).
+    auto supported = [] (const juce::AudioChannelSet& s)
+    {
+        return s == juce::AudioChannelSet::mono() || s == juce::AudioChannelSet::stereo()
+            || (s.size() == 6 && (s.isDiscreteLayout() || s.getChannelIndexForType (juce::AudioChannelSet::LFE) >= 0));
+    };
     const auto& out = layouts.getMainOutputChannelSet();
-    if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
-        return false;
-    if (out != layouts.getMainInputChannelSet())
+    if (! supported (out) || out != layouts.getMainInputChannelSet())
         return false;
     if (layouts.inputBuses.size() > 1)
     {
         const auto sc = layouts.getChannelSet (true, 1);
-        if (! sc.isDisabled() && sc != juce::AudioChannelSet::mono() && sc != juce::AudioChannelSet::stereo())
+        if (! sc.isDisabled() && ! supported (sc))
             return false;
     }
     return true;
 }
 
+// BS.1770 channel weights for a bus: LFE 0, surrounds 1.41 (+1.5 dB), others 1.
+static vometer::ChannelWeights weightsFor (const juce::AudioChannelSet& set)
+{
+    auto w = vometer::unityWeights();
+    if (set.size() != 6)
+        return w;
+    if (set.isDiscreteLayout())
+    {
+        w[3] = 0.0; w[4] = w[5] = 1.41;   // L R C LFE Ls Rs
+        return w;
+    }
+    for (int i = 0; i < std::min (set.size(), vometer::kMaxChannels); ++i)
+    {
+        using T = juce::AudioChannelSet;
+        const auto t = set.getTypeOfChannel (i);
+        if (t == T::LFE || t == T::LFE2)
+            w[(size_t) i] = 0.0;
+        else if (t == T::leftSurround || t == T::rightSurround || t == T::leftSurroundSide || t == T::rightSurroundSide
+                 || t == T::leftSurroundRear || t == T::rightSurroundRear || t == T::surround)
+            w[(size_t) i] = 1.41;
+    }
+    return w;
+}
+
 void VOMeterProcessor::prepareToPlay (double sampleRate, int)
 {
-    const int numCh = std::max (1, std::min (2, getMainBusNumOutputChannels()));
+    const int numCh = std::max (1, std::min (vometer::kMaxChannels, getMainBusNumOutputChannels()));
     limiter.prepare (sampleRate, numCh);
-    meter.prepare (sampleRate, numCh);
-    programme.prepare (sampleRate, 2);
+    meter.prepare (sampleRate, numCh, weightsFor (getChannelLayoutOfBus (true, 0)));
+    const bool hasSc = getBusCount (true) > 1 && getBus (true, 1)->isEnabled();
+    programme.prepare (sampleRate, vometer::kMaxChannels,
+                       hasSc ? weightsFor (getChannelLayoutOfBus (true, 1)) : vometer::unityWeights());
     sampleRateHz = sampleRate;
     latency = limiter.getLatency();
     setLatencySamples (latency);
@@ -157,13 +195,13 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     const int n = buffer.getNumSamples();
 
     // Programme audio on the sidechain (Logic sends silence when none is chosen).
-    const float* scPtr[2] { nullptr, nullptr };
+    const float* scPtr[vometer::kMaxChannels] {};
     int numSc = 0;
     if (getBusCount (true) > 1)
         if (auto* bus = getBus (true, 1); bus != nullptr && bus->isEnabled())
         {
             auto sc = getBusBuffer (buffer, true, 1);
-            numSc = std::min (2, sc.getNumChannels());
+            numSc = std::min (vometer::kMaxChannels, sc.getNumChannels());
             for (int c = 0; c < numSc; ++c)
                 scPtr[c] = sc.getReadPointer (c);
         }
@@ -201,7 +239,7 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     for (int i = 0; i < n; ++i)
     {
-        float in[2] {}, wet[2] {}, out[2] {};
+        float in[vometer::kMaxChannels] {}, wet[vometer::kMaxChannels] {}, out[vometer::kMaxChannels] {};
         const float g = trimGain.getNextValue();
         const float mix = wetMix.getNextValue();
 
@@ -228,7 +266,9 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
         if (numSc > 0)
         {
-            const float sc[2] { scPtr[0][i], numSc > 1 ? scPtr[1][i] : 0.0f };
+            float sc[vometer::kMaxChannels] {};
+            for (int c = 0; c < numSc; ++c)
+                sc[c] = scPtr[c][i];
             programme.push (sc, numSc, measuring);
         }
     }
@@ -249,11 +289,17 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     readings.matchMovedSinceReset.store (matchMaxSinceReset - matchMinSinceReset > 0.05f);
     readings.programmeDialogue.store ((float) programme.dialogueLufs());
     readings.programmeSignal.store (samplesSinceProgramme < (long long) (2.0 * sampleRateHz));
+
+    const bool integrated = numCh > 1 && measureParam->load() > 0.5f;
+    readings.integratedMode.store (integrated);
+    readings.outLoudness.store (integrated ? (float) meter.outputProgrammeLufs() : readings.outDialogue.load());
+    readings.inLoudness.store (integrated ? (float) meter.inputProgrammeLufs() : readings.inDialogue.load());
+    readings.programmeLoudness.store (integrated ? (float) programme.programmeLufs() : (float) programme.dialogueLufs());
 }
 
 float VOMeterProcessor::getSuggestedMatchDb() const noexcept
 {
-    const float in = readings.inDialogue.load();
+    const float in = readings.inLoudness.load();
     if (std::isnan (in))
         return std::numeric_limits<float>::quiet_NaN();
     return juce::jlimit (-vometer::kMatchRangeDb, vometer::kMatchRangeDb, targetParam->load() - in);
@@ -295,9 +341,23 @@ void VOMeterProcessor::setMixFormat (bool fiveOne)
     apvts.state.setProperty (mixChosenProp, true, nullptr);
 }
 
+static const juce::Identifier measureChosenProp { "measureChosen" };
+
+bool VOMeterProcessor::isMeasureModeChosen() const
+{
+    return apvts.state.getProperty (measureChosenProp, false);
+}
+
+void VOMeterProcessor::setMeasureMode (bool integrated)
+{
+    // Both readings are measured all the time, so switching needs no reset.
+    setAsGesture (apvts.getParameter (measureId), integrated ? 1.0f : 0.0f);
+    apvts.state.setProperty (measureChosenProp, true, nullptr);
+}
+
 bool VOMeterProcessor::useProgrammeAsTarget()
 {
-    const float p = readings.programmeDialogue.load();
+    const float p = readings.programmeLoudness.load();
     if (std::isnan (p))
         return false;
     setAsGesture (apvts.getParameter (targetId), juce::jlimit (-36.0f, -10.0f, std::round (p * 10.0f) / 10.0f));

@@ -31,6 +31,12 @@ constexpr float kMatchRangeDb = 24.0f;      // Match gain, set by the Match butt
 // (checked against Youlean's dialogue-gated reading of the same take).
 constexpr double kNoRelativeGate = 1000.0;
 
+// Up to 5.1 (L R C LFE Ls Rs). BS.1770 channel weights: 1.0 for the front
+// channels, 1.41 (+1.5 dB) for the surrounds, 0 for the LFE (not measured).
+constexpr int kMaxChannels = 6;
+using ChannelWeights = std::array<double, kMaxChannels>;
+inline ChannelWeights unityWeights() { ChannelWeights w; w.fill (1.0); return w; }
+
 // -----------------------------------------------------------------------------
 // Double-precision biquad (RBJ cookbook), transposed direct form II.
 // -----------------------------------------------------------------------------
@@ -187,7 +193,7 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// Stereo-linked true-peak brickwall limiter.
+// Channel-linked true-peak brickwall limiter.
 // Detection: 8x-oversampled (32-tap) peak of each sample's neighbourhood (so the
 // inter-sample peaks either side of a sample count against it). Gain: min-hold
 // over the lookahead window, release, then a box filter of the same length, so
@@ -196,7 +202,6 @@ private:
 class TruePeakLimiter
 {
 public:
-    static constexpr int kMaxChannels = 2;
     using Interp = TruePeakInterpolator<8, 32>;
 
     void prepare (double sr, int numChannels)
@@ -464,9 +469,10 @@ public:
     // Keeps the measurement: hosts call prepareToPlay at moments the user
     // doesn't expect (Logic does on entering and leaving an offline bounce), and
     // the reading must survive that. Only Reset Meter clears it.
-    void prepare (double sr, int numChannels)
+    void prepare (double sr, int numChannels, const ChannelWeights& w = unityWeights())
     {
-        channels = std::min (numChannels, 2);
+        channels = std::min (numChannels, kMaxChannels);
+        weights = w;
         hopLen = std::max (1, (int) std::round (0.1 * sr));
         for (auto& k : kIn) k.prepare (sr);
         for (auto& k : kOut) k.prepare (sr);
@@ -496,16 +502,17 @@ public:
     {
         numCh = std::min (numCh, channels);
         double pIn = 0, pOut = 0, mono = 0;
+        int monoCh = 0;
         for (int ch = 0; ch < numCh; ++ch)
         {
             const double ki = kIn[ch].process (in[ch]);
             const double ko = kOut[ch].process (out[ch]);
-            pIn += ki * ki; pOut += ko * ko;
-            mono += in[ch];
+            pIn += weights[(size_t) ch] * ki * ki; pOut += weights[(size_t) ch] * ko * ko;
+            if (weights[(size_t) ch] > 0.0) { mono += in[ch]; ++monoCh; }
             if (measuring)
                 tpMax = std::max (tpMax, tpMeter[ch].push (out[ch]));
         }
-        speech.push (pIn, mono / std::max (1, numCh));
+        speech.push (pIn, mono / std::max (1, monoCh));
 
         if (! measuring) return;
 
@@ -570,8 +577,9 @@ private:
     int channels = 2, hopLen = 4800, count = 0, filled = 0, subIdx = 0;
     double acc = 0, accIn = 0;
     std::array<double, kShortHops> hopIn {}, hopOut {};
-    KWeighting kIn[2], kOut[2];
-    TruePeakInterpolator<8, 32> tpMeter[2];   // true-peak meter (8x, finer than BS.1770's 4x)
+    ChannelWeights weights = unityWeights();
+    KWeighting kIn[kMaxChannels], kOut[kMaxChannels];
+    TruePeakInterpolator<8, 32> tpMeter[kMaxChannels];   // true-peak meter (8x, finer than BS.1770's 4x)
     SpeechDetector speech;
     LoudnessHistogram inDialogue, outDialogue, inProgramme, outProgramme, shortTerm;
     double cache[5] {};
@@ -588,9 +596,10 @@ class ProgrammeMeter
 public:
     ProgrammeMeter() { reset(); }
 
-    void prepare (double sr, int numChannels)   // keeps the measurement, like LoudnessMeter
+    void prepare (double sr, int numChannels, const ChannelWeights& w = unityWeights())   // keeps the measurement, like LoudnessMeter
     {
-        channels = std::min (numChannels, 2);
+        channels = std::min (numChannels, kMaxChannels);
+        weights = w;
         hopLen = std::max (1, (int) std::round (0.1 * sr));
         for (auto& k : kw) k.prepare (sr);
         speech.prepare (sr);
@@ -610,13 +619,14 @@ public:
     {
         numCh = std::min (numCh, channels);
         double p = 0, mono = 0;
+        int monoCh = 0;
         for (int ch = 0; ch < numCh; ++ch)
         {
             const double k = kw[ch].process (x[ch]);
-            p += k * k;
-            mono += x[ch];
+            p += weights[(size_t) ch] * k * k;
+            if (weights[(size_t) ch] > 0.0) { mono += x[ch]; ++monoCh; }
         }
-        speech.push (p, mono / std::max (1, numCh));
+        speech.push (p, mono / std::max (1, monoCh));
         if (! measuring) return;
 
         acc += p;
@@ -648,7 +658,8 @@ private:
     int channels = 2, hopLen = 4800, count = 0, filled = 0, subIdx = 0;
     double acc = 0, cache[2] {};
     std::array<double, 4> hops {};
-    KWeighting kw[2];
+    ChannelWeights weights = unityWeights();
+    KWeighting kw[kMaxChannels];
     SpeechDetector speech;
     LoudnessHistogram dialogue, full;
     long long hopsMeasured = 0, speechHops = 0;

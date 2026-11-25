@@ -35,6 +35,16 @@ void styleButton (juce::TextButton& b)
 
 VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p),
+      mixQuestion ("mixQuestion", "Is this mix stereo or 5.1?",
+                   "A mono narration measures 3 dB louder in a stereo mix than in a 5.1 centre channel. "
+                   "VOMeter reads it the way your mix will, so you can use the programme's own target. "
+                   "You can change this later in the Presets menu.",
+                   "Stereo mix", "5.1 mix"),
+      measureQuestion ("measureQuestion", "What should VOMeter measure?",
+                       "Dialogue-gated: only speech counts, for a narration or dialogue target. "
+                       "Integrated: the whole signal (BS.1770), to master a mix to a target. "
+                       "You can change this later in the Presets menu.",
+                       "Dialogue-gated", "Integrated"),
       footer (p.updateChecker),
       targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
                         [this] (float v) { targetLabel.setText (juce::String (v, 1), juce::dontSendNotification); repaint(); }),
@@ -52,7 +62,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     targetLabel.setColour (juce::Label::textWhenEditingColourId, brand::textMain);
     targetLabel.setColour (juce::Label::outlineWhenEditingColourId, brand::accent);
     targetLabel.setColour (juce::TextEditor::highlightColourId, brand::accent.withAlpha (0.4f));
-    targetLabel.setTooltip ("Target dialogue loudness. Click and type a value (-36 to -10 LUFS).");
+    targetLabel.setTooltip ("Target loudness. Click and type a value (-36 to -10 LUFS).");
     targetLabel.onTextChange = [this] { setTargetFromText (targetLabel.getText()); };
     targetAttachment.sendInitialUpdate();
 
@@ -86,7 +96,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
 
     addChildComponent (useProgrammeButton);
     styleButton (useProgrammeButton);
-    useProgrammeButton.setTooltip ("Set the target to the programme's dialogue loudness (from the side chain).");
+    useProgrammeButton.setTooltip ("Set the target to the programme's loudness (from the side chain).");
     useProgrammeButton.onClick = [this] { audioProcessor.useProgrammeAsTarget(); };
 
     addAndMakeVisible (resetButton);
@@ -103,6 +113,13 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     {
         audioProcessor.setMixFormat (fiveOne);
         mixQuestion.setVisible (false);
+    };
+    addChildComponent (measureQuestion);
+    measureQuestion.onAnswer = [this] (bool integratedChoice)
+    {
+        audioProcessor.setMeasureMode (integratedChoice);
+        measureQuestion.setVisible (false);
+        timerCallback();
     };
 
     addAndMakeVisible (footer);
@@ -169,6 +186,16 @@ void VOMeterEditor::showPresetMenu()
         menu.addItem (fiveOneId, "5.1 mix (centre channel, no offset)", true, fiveOne);
     }
 
+    // Stereo and 5.1 tracks: what the target applies to (asked once, changeable here).
+    constexpr int dialogueId = 103, integratedId = 104;
+    if (audioProcessor.asksMeasureMode())
+    {
+        const bool integ = audioProcessor.isIntegratedMode();
+        menu.addSectionHeader ("Measure");
+        menu.addItem (dialogueId, "Dialogue-gated (narration, dialogue)", true, ! integ);
+        menu.addItem (integratedId, "Integrated (master a mix)", true, integ);
+    }
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
                         [this] (int result)
                         {
@@ -176,6 +203,8 @@ void VOMeterEditor::showPresetMenu()
                                 targetAttachment.setValueAsCompleteGesture (presets[result - 1].lufs);
                             else if (result == 101 || result == 102)
                                 audioProcessor.setMixFormat (result == 102);
+                            else if (result == 103 || result == 104)
+                                audioProcessor.setMeasureMode (result == 104);
                         });
 }
 
@@ -185,8 +214,9 @@ void VOMeterEditor::timerCallback()
     if (resetPending && ! audioProcessor.meterResetPending())
         resetPending = false;
 
-    outLufs = r.outDialogue.load();
-    inLufs = r.inDialogue.load();
+    integrated = audioProcessor.isIntegratedMode();
+    outLufs = r.outLoudness.load();
+    inLufs = r.inLoudness.load();
     lra = r.lra.load();
     tp = r.maxTruePeak.load();
     speechSec = r.speechSeconds.load();
@@ -194,15 +224,17 @@ void VOMeterEditor::timerCallback()
     measuring = r.measuring.load();
     trimMoved = r.trimMovedSinceReset.load();
     matchMoved = r.matchMovedSinceReset.load();
-    progLufs = r.programmeDialogue.load();
+    progLufs = r.programmeLoudness.load();
     progSignal = r.programmeSignal.load();
     matchDb = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::matchId)->load();
-    const bool ask = audioProcessor.isMonoTrack() && ! audioProcessor.isMixFormatChosen();
-    if (mixQuestion.isVisible() != ask)
+    auto showIf = [] (ChoiceQuestion& q, bool ask)
     {
-        mixQuestion.setVisible (ask);
-        if (ask) mixQuestion.toFront (false);
-    }
+        if (q.isVisible() == ask) return;
+        q.setVisible (ask);
+        if (ask) q.toFront (false);
+    };
+    showIf (mixQuestion, audioProcessor.isMonoTrack() && ! audioProcessor.isMixFormatChosen());
+    showIf (measureQuestion, audioProcessor.asksMeasureMode() && ! audioProcessor.isMeasureModeChosen());
     suggested = audioProcessor.getSuggestedMatchDb();
     gr = std::max (r.limiterGr.load(), gr - 1.0f);   // hold, then fall 20 dB/s
 
@@ -243,7 +275,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     const float diff = valid ? outLufs - target : 0.0f;
     const bool onTarget = valid && std::abs (diff) <= vometer::kOnTargetLU;
 
-    drawCaption (g, "OUTPUT DIALOGUE", bigReadout.withHeight (18));
+    drawCaption (g, integrated ? "OUTPUT INTEGRATED" : "OUTPUT DIALOGUE", bigReadout.withHeight (18));
     auto big = bigReadout.withTrimmedTop (18);
     const juce::Font bigFont (juce::FontOptions (54.0f, juce::Font::bold));
     const auto value = valid ? fmt (outLufs) : utf8 (kDash);
@@ -272,7 +304,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
         juce::Colour fill = brand::track, ink = brand::textMain;
         if (! valid)
         {
-            text = measuring ? "WAITING FOR DIALOGUE" : "PRESS PLAY TO MEASURE";
+            text = ! measuring ? "PRESS PLAY TO MEASURE" : (integrated ? "WAITING FOR AUDIO" : "WAITING FOR DIALOGUE");
             ink = brand::textDim;
         }
         else if (onTarget)
@@ -313,6 +345,8 @@ void VOMeterEditor::paint (juce::Graphics& g)
             hint = utf8 ("Green = within \xc2\xb1") + fmt (vometer::kOnTargetLU) + " LU of the target"
                    + (trimMoved ? utf8 ("  \xc2\xb7  includes your trim rides") : juce::String())
                    + (measuring ? "" : utf8 ("  \xc2\xb7  paused"));
+        else if (integrated)
+            hint = utf8 ("Measures only while playing  \xc2\xb7  integrated loudness (BS.1770)");
         else
             hint = utf8 ("Measures only while playing  \xc2\xb7  ignores pauses, breaths and room tone");
         g.setColour (matchMoved ? brand::accent : brand::textDim);
@@ -357,7 +391,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // ---- Trim panel ---------------------------------------------------------
     drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
 
-    drawCaption (g, "INPUT DIALOGUE  (BEFORE GAIN)", inputArea.withHeight (18));
+    drawCaption (g, integrated ? "INPUT INTEGRATED  (BEFORE GAIN)" : "INPUT DIALOGUE  (BEFORE GAIN)", inputArea.withHeight (18));
     g.setColour (std::isnan (inLufs) ? brand::textDim : brand::textMain);
     g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     g.drawText (std::isnan (inLufs) ? utf8 (kDash) : fmt (inLufs) + " LUFS", inputArea.withTrimmedTop (18), juce::Justification::centredLeft);
@@ -392,6 +426,7 @@ void VOMeterEditor::resized()
 
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
     mixQuestion.setBounds (getLocalBounds().withBottom (footer.getY() - 6));
+    measureQuestion.setBounds (mixQuestion.getBounds());
     area.removeFromBottom (6);
     bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
     area.removeFromBottom (12);

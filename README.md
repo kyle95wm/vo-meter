@@ -3,8 +3,10 @@
 A loudness finisher for the end of a voice-over track. It measures the **dialogue-gated
 integrated loudness** of your narration and, through a side chain, of the programme (OV)
 it sits in. **Match** lands the narration on the target, and an automatable **Trim** lets you
-ride it from there. A true-peak limiter holds the output under **-2.5 dBTP**. It is available
-as a VST3 on all platforms, plus an AU on macOS.
+ride it from there. A true-peak limiter holds the output under **-2.5 dBTP**. On a stereo or
+5.1 bus it can instead measure standard **integrated loudness**, to master a whole mix to a
+target. It works on mono, stereo and 5.1 tracks. It is available as a VST3 on all platforms,
+plus an AU on macOS.
 
 ![VOMeter plugin window](docs/screenshot.png)
 
@@ -32,9 +34,20 @@ channel alone, with no offset. So on a mono track, VOMeter asks once, when you f
 **Is this mix stereo or 5.1?** The answer is saved with the session. From then on every
 narration reading is given as heard in that mix, so you always use the programme's own target
 (-27 for a -27 OV). To change the answer, use the **Mix** section at the bottom of the
-Presets menu. Stereo tracks are never asked, because the answer makes no difference to them.
+Presets menu. Stereo and 5.1 tracks aren't asked this, because it makes no difference to them.
 The stereo offset assumes Logic's default pan law, where a centre-panned mono track stays at
 unity in each channel. With the plain "-3 dB" pan law there's no offset, so answer 5.1.
+
+**Mastering a mix to a target.** On a stereo or 5.1 track, VOMeter asks once instead:
+**What should VOMeter measure?**
+- **Dialogue-gated** is for a stereo narration or dialogue stem, as above.
+- **Integrated** is for a mix bus or master. Every reading switches to standard BS.1770
+  integrated loudness of the whole signal: the big readout, the input reading, Match and
+  the programme's **Use**.
+
+Put VOMeter last on the bus and play or bounce the mix. Press **Match**, then use the trim for
+any rides, as with narration. Both readings are measured all the time, so you can switch
+between them in the **Measure** section of the Presets menu without losing the pass.
 
 **How Logic's side chain works:** a side chain taken from a track is post-insert and
 pre-fader. VOMeter hears the OV after its plug-ins (including VODucker's ducking, hence the
@@ -44,6 +57,10 @@ duck harder; riding the narration fader doesn't.
 
 ## What it measures
 
+- **Integrated loudness** (Integrated mode on stereo and 5.1 tracks) is plain ITU-R BS.1770-4:
+  -70 LUFS absolute and -10 LU relative gates over the whole signal.
+- **5.1** uses the BS.1770 channel weights: front channels 1.0, surrounds +1.5 dB, and the LFE
+  isn't measured. The limiter links all six channels.
 - **Dialogue loudness** follows ITU-R BS.1770 (K-weighting, 400 ms blocks every 100 ms,
   -70 LUFS absolute gate), but it uses speech gating instead of the -10 LU relative level
   gate: only blocks that a speech detector marks as dialogue count. On a real VO take this
@@ -68,7 +85,7 @@ duck harder; riding the narration fader doesn't.
 
 | Control | What it does |
 |---------|--------------|
-| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). On mono tracks it also has a Mix section (Stereo / 5.1). Shown in green when the output is within ±2 LU of it. |
+| Target | Loudness to aim for (dialogue-gated or integrated, as chosen), -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). On mono tracks it also has a Mix section (Stereo / 5.1); on stereo and 5.1 tracks a Measure section (Dialogue-gated / Integrated). Shown in green when the output is within ±2 LU of it. |
 | Use | Sets the target to the programme's dialogue loudness from the side chain |
 | Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB, then resets the meter. It never touches the trim. |
 | Clear | Sets the Match gain back to 0 dB and resets the meter |
@@ -78,15 +95,15 @@ duck harder; riding the narration fader doesn't.
 
 | Readout | Meaning |
 |---------|---------|
-| Output dialogue | Dialogue-gated integrated loudness of the narration output since the last reset |
-| Programme | Dialogue-gated integrated loudness of the side-chain programme. Hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
+| Output dialogue (or integrated) | Loudness of the output since the last reset: dialogue-gated, or integrated in Integrated mode |
+| Programme | Loudness of the side-chain programme, measured the same way (dialogue-gated or integrated). Hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
 | Max true peak | Highest output true peak since the reset (8× oversampled) |
 | Gain reduction | How many dB the -2.5 dBTP limiter is turning the audio down right now (held briefly, then falls back). Red while it is working; "None" when it isn't |
 | LRA | Loudness range of the output (EBU Tech 3342) |
 | Speech | Share of the measured time that counted as dialogue |
-| Input dialogue / Match gain | Dialogue loudness before any gain, the current Match gain, and what Match would set it to |
+| Input dialogue (or integrated) / Match gain | Loudness before any gain, the current Match gain, and what Match would set it to |
 
-**Limiter:** a stereo-linked lookahead brickwall limiter. It detects inter-sample peaks with
+**Limiter:** a channel-linked lookahead brickwall limiter. It detects inter-sample peaks with
 8× oversampling and holds the output at -2.55 dBTP, a 0.05 dB margin so other true-peak meters
 agree. It adds about 1.8 ms of latency, which the plugin reports to the host. On normal VO
 levels it does nothing until a peak would cross the ceiling.

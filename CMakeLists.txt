@@ -17,7 +17,7 @@ set(VO_METER_VST3_CATEGORIES Fx)                     # e.g. Fx Dynamics / Fx EQ 
 # The release workflow passes -DVO_METER_VERSION=<tag without the leading v>,
 # so the version baked into the plugin (and used by the update checker) always
 # matches the GitHub Release it ships in.
-set(VO_METER_VERSION "0.2.0" CACHE STRING "Plugin version (major.minor.patch)")
+set(VO_METER_VERSION "0.3.0" CACHE STRING "Plugin version (major.minor.patch)")
 
 # Must be set before project() to take effect. 10.13 is what both released
 # plugins ship with; JUCE 8 supports it and it covers every Mac running Logic 10.4+.

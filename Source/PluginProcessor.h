@@ -49,6 +49,7 @@ public:
     static constexpr const char* trimId   = "trim";
     static constexpr const char* matchId  = "match";    // added in 0.2.0
     static constexpr const char* mixId    = "mix";      // added in 0.2.0: Stereo / 5.1
+    static constexpr const char* measureId = "measure"; // added in 0.3.0: Dialogue / Integrated
     static constexpr const char* targetId = "target";
     static constexpr const char* bypassId = "bypass";
 
@@ -70,6 +71,13 @@ public:
         std::atomic<float> programmeDialogue { std::numeric_limits<float>::quiet_NaN() };
         std::atomic<bool> programmeSignal { false };      // sidechain audio in the last 2 s
         std::atomic<float> mixOffsetDb { 0.0f };          // added to the narration readings (mono in a stereo mix)
+
+        // What the target applies to, in the chosen measure mode: dialogue-gated
+        // (the *Dialogue readings above) or standard integrated loudness.
+        std::atomic<bool> integratedMode { false };
+        std::atomic<float> outLoudness { std::numeric_limits<float>::quiet_NaN() };
+        std::atomic<float> inLoudness  { std::numeric_limits<float>::quiet_NaN() };
+        std::atomic<float> programmeLoudness { std::numeric_limits<float>::quiet_NaN() };
     };
     Readings readings;
 
@@ -78,14 +86,14 @@ public:
     void requestMeterReset() noexcept { resetRequested.store (true); }
     bool meterResetPending() const noexcept { return resetRequested.load(); }
 
-    // The Match gain that brings the input's dialogue loudness to the target
+    // The Match gain that brings the input's loudness (in the measure mode) to the target
     // (with the trim at 0 dB), or NaN before there's a reading.
     float getSuggestedMatchDb() const noexcept;
     // Sets Match Gain to the suggestion (one undoable gesture). Never touches the trim.
     // Both reset the meter (not the trim or target), since a gain change makes the readings stale.
     bool applySuggestedMatch();
     void clearMatch();
-    // Sets the target to the programme's dialogue loudness (sidechain).
+    // Sets the target to the programme's loudness (sidechain), in the measure mode.
     bool useProgrammeAsTarget();
 
     // True when this instance sits on a mono track (the Stereo/5.1 choice matters).
@@ -97,6 +105,14 @@ public:
     bool isFiveOneMix() const noexcept { return mixParam->load() > 0.5f; }
     void setMixFormat (bool fiveOne);
 
+    // Stereo and 5.1 tracks: measure dialogue-gated loudness (narration) or
+    // integrated loudness (mastering a mix). Asked once, saved with the session.
+    // Mono tracks are narration: always dialogue-gated. Message thread only.
+    bool asksMeasureMode() const noexcept { return ! isMonoTrack(); }
+    bool isMeasureModeChosen() const;
+    bool isIntegratedMode() const noexcept { return asksMeasureMode() && measureParam->load() > 0.5f; }
+    void setMeasureMode (bool integrated);
+
     // Direct access for the test tool (audio thread only).
     const vometer::LoudnessMeter& getMeter() const noexcept { return meter; }
 
@@ -107,6 +123,7 @@ private:
     std::atomic<float>* trimParam = nullptr;
     std::atomic<float>* matchParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
+    std::atomic<float>* measureParam = nullptr;
     std::atomic<float>* targetParam = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
 
