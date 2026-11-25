@@ -448,6 +448,40 @@ void testOnlyMeasuresWhilePlaying()
     p->setPlayHead (nullptr);
 }
 
+void testOfflineBounce()
+{
+    // Promise: an offline bounce measures like real-time playback, and the
+    // reading survives the host re-preparing the plugin as it enters and
+    // leaves offline mode (JUCE's AU wrapper calls prepareToPlay both times).
+    TestPlayHead head;
+    head.playing = false;   // some hosts don't report "playing" while bouncing
+    auto p = makeProcessor (48000.0, 2);
+    p->setPlayHead (&head);
+    const auto take = synthNarration (48000.0, 2, 20.0, -12.0f, 10);
+
+    p->setNonRealtime (true);
+    p->prepareToPlay (48000.0, 1024);
+    process (*p, take, 1024);
+    const float during = p->readings.outDialogue.load();
+    CHECK (! std::isnan (during) && std::abs (p->readings.measuredSeconds.load() - 20.0f) < 0.5f,
+           "offline bounce measured %.1f s, reading %.2f", p->readings.measuredSeconds.load(), during);
+
+    p->setNonRealtime (false);
+    p->prepareToPlay (48000.0, kBlock);
+    process (*p, silence (2, kBlock));  // the host keeps running, stopped
+    const float after = p->readings.outDialogue.load();
+    CHECK (std::abs (after - during) < 1.0e-4f, "reading changed after the bounce ended (%.2f -> %.2f)", during, after);
+    CHECK (std::abs (p->readings.measuredSeconds.load() - 20.0f) < 0.5f, "measured time changed after the bounce");
+
+    // A second bounce of the same take, without a reset, gives the same reading.
+    p->setNonRealtime (true);
+    p->prepareToPlay (48000.0, 1024);
+    process (*p, take, 1024);
+    CHECK (std::abs (p->readings.outDialogue.load() - during) < 0.05f, "second bounce read %.2f vs %.2f",
+           p->readings.outDialogue.load(), during);
+    p->setPlayHead (nullptr);
+}
+
 void testBypass()
 {
     // Promise: Bypass gives back the input bit for bit (after the reported
@@ -602,6 +636,7 @@ int main (int argc, char** argv)
     testSuggestedTrimClamps();
     testResetClearsMeterNotTrim();
     testOnlyMeasuresWhilePlaying();
+    testOfflineBounce();
     testBypass();
     testStateRoundTrip();
     testVersionCompare();

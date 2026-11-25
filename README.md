@@ -23,7 +23,8 @@ green when the dialogue loudness is within ±2 LU of it.
 - The meter measures both the **output** (after trim and limiter; the big readout) and the
   **input** (before trim). The input reading gives the suggested trim, so the suggestion stays
   valid after you move the trim.
-- It measures **only while the transport plays**. It runs over the whole pass (it is a true
+- It measures **only while the transport plays**, or while the host renders offline (Logic's
+  offline bounce). It runs over the whole pass (it is a true
   integrated reading with no time window) until you press Reset Meter.
 - On plain BS.1770 the meter agrees with the EBU Tech 3341 test signals and with
   `ffmpeg -af ebur128` to within 0.1 LU.
@@ -42,7 +43,7 @@ green when the dialogue loudness is within ±2 LU of it.
 |---------|---------|
 | Dialogue loudness | Dialogue-gated integrated loudness of the output since the last reset |
 | Max true peak | Highest output true peak since the reset (8× oversampled) |
-| Limiter | Current gain reduction of the -2.5 dBTP limiter; red while it is working |
+| Gain reduction | How many dB the -2.5 dBTP limiter is turning the audio down right now (held briefly, then falls back). Red while it is working; "None" when it isn't |
 | LRA | Loudness range of the output (EBU Tech 3342) |
 | Speech | Share of the measured time that counted as dialogue |
 | Input dialogue / Suggested trim | Dialogue loudness before the trim, and the trim that would land it on the target (limited to ±18 dB) |
@@ -56,6 +57,8 @@ levels it does nothing until a peak would cross the ceiling.
 
 - If you move the trim (or automate it) during a pass, the output reading mixes the
   settings. The window says so; reset and replay for a clean number.
+- Offline bounces (Logic: Bounce with Mode: Offline) are measured just like real-time
+  playback, so you can bounce the track and read the result without playing it through.
 - If the suggested trim shows "(limit)", the take needs more than ±18 dB. Fix the gain
   earlier in the chain.
 - The test tool can measure a real file and render it at a target:

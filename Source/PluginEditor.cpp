@@ -266,7 +266,8 @@ void VOMeterEditor::paint (juce::Graphics& g)
         tile ("MAX TRUE PEAK", tpValid ? fmt (tp) + " dBTP" : utf8 (kDash), tpOver ? brand::warn : (tpValid ? brand::textMain : brand::textDim));
 
         const bool limiting = gr > 0.1f;
-        auto grTile = tile ("LIMITER", limiting ? "-" + fmt (gr) + " dB" : "0.0 dB", limiting ? brand::warn : brand::textMain);
+        // The -2.5 dBTP limiter's live gain reduction (held, then falling 20 dB/s).
+        auto grTile = tile ("GAIN REDUCTION", limiting ? "-" + fmt (gr) + " dB" : juce::String ("None"), limiting ? brand::warn : brand::textDim);
         auto bar = grTile.removeFromBottom (4).withTrimmedRight (16).toFloat();
         g.setColour (brand::track);
         g.fillRoundedRectangle (bar, 2.0f);

@@ -74,6 +74,9 @@ void VOMeterProcessor::prepareToPlay (double sampleRate, int)
 
 bool VOMeterProcessor::hostIsPlaying()
 {
+    // Offline bounces always measure, whatever the transport reports.
+    if (isNonRealtime())
+        return true;
     // Hosts without a play head (and the test tool) always measure.
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())

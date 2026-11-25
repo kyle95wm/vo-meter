@@ -434,14 +434,19 @@ private:
 class LoudnessMeter
 {
 public:
+    LoudnessMeter() { reset(); }
+
+    // Keeps the measurement: hosts call prepareToPlay at moments the user
+    // doesn't expect (Logic does on entering and leaving an offline bounce), and
+    // the reading must survive that. Only Reset Meter clears it.
     void prepare (double sr, int numChannels)
     {
         channels = std::min (numChannels, 2);
         hopLen = std::max (1, (int) std::round (0.1 * sr));
         for (auto& k : kIn) k.prepare (sr);
         for (auto& k : kOut) k.prepare (sr);
+        for (auto& t : tpMeter) t.reset();
         speech.prepare (sr);
-        reset();
         restartBlocks();
     }
 

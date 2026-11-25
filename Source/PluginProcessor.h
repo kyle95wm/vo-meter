@@ -6,7 +6,8 @@
 
 // VOMeter: Trim -> -2.5 dBTP true-peak limiter, with dialogue-gated loudness
 // metering of the input (before trim, for the suggested trim) and the output.
-// The meter only accumulates while the host's transport is playing.
+// The meter only accumulates while the host's transport is playing (or the
+// host is rendering offline, e.g. Logic's offline bounce).
 class VOMeterProcessor : public juce::AudioProcessor
 {
 public:
