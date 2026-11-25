@@ -4,6 +4,7 @@ namespace
 {
 juce::String utf8 (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
 const char* kDash = "\xe2\x80\x94";   // em dash: "no reading yet"
+constexpr int kTitleRowHeight = 28;     // brand::drawHeader's title row (no subtitle row here)
 
 juce::String fmt (float v, int decimals = 1)
 {
@@ -87,7 +88,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
 
     addAndMakeVisible (footer);
 
-    setSize (520, 600);
+    setSize (520, 600 - (brand::headerHeight - kTitleRowHeight) + 2);
     startTimerHz (20);
     timerCallback();
 }
@@ -169,8 +170,8 @@ void VOMeterEditor::timerCallback()
 void VOMeterEditor::paint (juce::Graphics& g)
 {
     g.fillAll (brand::bg);
-    brand::drawHeader (g, getLocalBounds(), JucePlugin_Name, UpdateChecker::getCurrentVersion(),
-                       utf8 ("Dialogue-gated loudness  \xc2\xb7  trim  \xc2\xb7  -2.5 dBTP true-peak limiter"));
+    // No subtitle line (the user prefers the plain title); resized() closes up its row.
+    brand::drawHeader (g, getLocalBounds(), JucePlugin_Name, UpdateChecker::getCurrentVersion(), {});
 
     for (auto panel : { loudPanel, statsPanel, trimPanel })
     {
@@ -301,7 +302,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
 void VOMeterEditor::resized()
 {
     auto area = getLocalBounds().reduced (brand::margin);
-    area.removeFromTop (brand::headerHeight + 8);
+    area.removeFromTop (kTitleRowHeight + 10);
 
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
     area.removeFromBottom (6);

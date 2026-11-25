@@ -6,7 +6,7 @@
 #include "UpdateFooter.h"
 
 // Window layout (see CONVENTIONS.md):
-//   header   - plugin name, version, subtitle
+//   header   - plugin name and version (no subtitle)
 //   loudness - big dialogue-gated output LUFS, editable target (green when on target)
 //   stats    - max true peak, limiter gain reduction, LRA, speech share
 //   trim     - Trim knob (alt-click = 0 dB), input loudness, suggested trim, Match, Reset Meter
