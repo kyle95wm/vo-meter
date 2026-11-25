@@ -9,7 +9,11 @@ as standard **integrated loudness** (EBU R128, ATSC A/85). It works on mono, ste
 tracks. It is available as a VST3 on all platforms,
 plus an AU on macOS.
 
-![VOMeter plugin window](docs/screenshot.png)
+![VOMeter on a mono narration track](docs/screenshot.png)
+
+*A mono narration track: the dialogue-gated reading on target, the programme's reading from
+the side chain, a +1.5 dB trim ride on top of the Match gain, and the output and gain
+reduction meters on the right.*
 
 ## Workflow
 
@@ -39,6 +43,8 @@ Presets menu. Stereo and 5.1 tracks aren't asked this, because it makes no diffe
 The stereo offset assumes Logic's default pan law, where a centre-panned mono track stays at
 unity in each channel. With the plain "-3 dB" pan law there's no offset, so answer 5.1.
 
+<img src="docs/mix-question.png" width="520" alt="The one-time question on a mono track: Is this mix stereo or 5.1?">
+
 **Mastering a mix to a target.** A stereo or 5.1 track is treated as a full mix. Put VOMeter
 last on the mix bus, play or bounce the mix, and press **Match**. A mix is mastered with one
 fixed gain, so there's no trim: the knob is hidden, and any trim value or automation is
@@ -51,6 +57,14 @@ ignored. VOMeter asks once which measurement your delivery spec uses:
 
 Both readings are measured all the time, so you can switch between them in the **Measure**
 section of the Presets menu without losing the pass.
+
+<img src="docs/measure-question.png" width="520" alt="The one-time question on a stereo or 5.1 track: What should VOMeter measure?">
+
+| Full mix, dialogue-gated | Full mix, integrated |
+|---|---|
+| ![A stereo mix measured dialogue-gated: no trim and no programme row](docs/full-mix.png) | ![A stereo mix measured integrated](docs/integrated.png) |
+
+*On a full mix there's no trim knob and no programme row: Match sets the gain.*
 
 **How Logic's side chain works:** a side chain taken from a track is post-insert and
 pre-fader. VOMeter hears the OV after its plug-ins (including VODucker's ducking, hence the
@@ -110,6 +124,11 @@ duck harder; riding the narration fader doesn't.
 8× oversampling and holds the output at -2.55 dBTP, a 0.05 dB margin so other true-peak meters
 agree. It adds about 1.8 ms of latency, which the plugin reports to the host. On normal VO
 levels it does nothing until a peak would cross the ceiling.
+
+<img src="docs/surround-limiting.png" width="520" alt="A 5.1 mix pushed 20 dB into the limiter">
+
+*A 5.1 mix pushed 20 dB too hot: six output bars held at the ceiling (red line), the gain
+reduction bar working, and TP MAX at -2.5.*
 
 **Tips**
 
