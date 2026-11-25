@@ -136,8 +136,7 @@ void VOMeterProcessor::prepareToPlay (double sampleRate, int)
     dryPos = 0;
 
     trimGain.reset (sampleRate, 0.02);  // 20 ms ramps: click-free trim moves
-    const bool integratedMode = getMainBusNumInputChannels() > 1 && measureParam->load() > 0.5f;
-    trimGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (matchParam->load() + (integratedMode ? 0.0f : trimParam->load())));
+    trimGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (matchParam->load() + (hasTrim() ? trimParam->load() : 0.0f)));
     wetMix.reset (sampleRate, 0.02);
     wetMix.setCurrentAndTargetValue (bypassParam->get() ? 0.0f : 1.0f);
     wasMeasuring = false;
@@ -180,10 +179,10 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     }
     wasMeasuring = measuring;
 
-    // Integrated mode (mastering a mix) has no trim: Match alone sets the gain,
-    // and any trim value or automation is ignored.
-    const bool integratedMode = getMainBusNumInputChannels() > 1 && measureParam->load() > 0.5f;
-    const float trimDb = integratedMode ? 0.0f : trimParam->load(), matchDb = matchParam->load();
+    // The trim is for riding a mono narration through the mix. Stereo and 5.1
+    // tracks are a full mix being mastered: Match alone sets the gain, and any
+    // trim value or automation is ignored.
+    const float trimDb = hasTrim() ? trimParam->load() : 0.0f, matchDb = matchParam->load();
     trimGain.setTargetValue (juce::Decibels::decibelsToGain (matchDb + trimDb));
     if (measuring)
     {

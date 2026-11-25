@@ -164,7 +164,7 @@ private:
     // Snapshot of the processor's readings, refreshed by the timer.
     float outLufs = NAN, inLufs = NAN, lra = NAN, tp = -INFINITY, gr = 0.0f, suggested = NAN;
     float speechSec = 0.0f, measuredSec = 0.0f, matchDb = 0.0f, progLufs = NAN;
-    bool integrated = false, measuring = false, trimMoved = false, matchMoved = false, progSignal = false, resetPending = false;
+    bool integrated = false, showTrim = true, measuring = false, trimMoved = false, matchMoved = false, progSignal = false, resetPending = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VOMeterEditor)
 };

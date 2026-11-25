@@ -41,9 +41,9 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
                    "You can change this later in the Presets menu.",
                    "Stereo mix", "5.1 mix"),
       measureQuestion ("measureQuestion", "What should VOMeter measure?",
-                       "Dialogue-gated: only speech counts, for a narration or dialogue target. "
-                       "Integrated: the whole signal (BS.1770), to master a mix to a target. "
-                       "You can change this later in the Presets menu.",
+                       "Pick what your delivery spec measures. Dialogue-gated: only speech counts "
+                       "(Netflix and other dialogue-based specs). Integrated: the whole mix, BS.1770 "
+                       "(EBU R128, ATSC A/85). You can change this later in the Presets menu.",
                        "Dialogue-gated", "Integrated"),
       footer (p.updateChecker),
       targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
@@ -192,8 +192,8 @@ void VOMeterEditor::showPresetMenu()
     {
         const bool integ = audioProcessor.isIntegratedMode();
         menu.addSectionHeader ("Measure");
-        menu.addItem (dialogueId, "Dialogue-gated (narration, dialogue)", true, ! integ);
-        menu.addItem (integratedId, "Integrated (master a mix)", true, integ);
+        menu.addItem (dialogueId, "Dialogue-gated (Netflix, dialogue specs)", true, ! integ);
+        menu.addItem (integratedId, "Integrated (EBU R128, ATSC A/85)", true, integ);
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
@@ -214,10 +214,11 @@ void VOMeterEditor::timerCallback()
     if (resetPending && ! audioProcessor.meterResetPending())
         resetPending = false;
 
-    if (const bool integ = audioProcessor.isIntegratedMode(); integ != integrated)
+    integrated = audioProcessor.isIntegratedMode();
+    if (const bool trim = audioProcessor.hasTrim(); trim != showTrim)
     {
-        integrated = integ;   // no trim when mastering a mix: re-lay out the gain panel
-        trimKnob.setVisible (! integrated);
+        showTrim = trim;   // no trim on a full mix (stereo / 5.1): re-lay out the gain panel
+        trimKnob.setVisible (showTrim);
         resized();
     }
     outLufs = r.outLoudness.load();
@@ -227,7 +228,7 @@ void VOMeterEditor::timerCallback()
     speechSec = r.speechSeconds.load();
     measuredSec = r.measuredSeconds.load();
     measuring = r.measuring.load();
-    trimMoved = r.trimMovedSinceReset.load() && ! integrated;
+    trimMoved = r.trimMovedSinceReset.load() && showTrim;
     matchMoved = r.matchMovedSinceReset.load();
     progLufs = r.programmeLoudness.load();
     progSignal = r.programmeSignal.load();
@@ -394,7 +395,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     }
 
     // ---- Trim panel ---------------------------------------------------------
-    if (! integrated)
+    if (showTrim)
         drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
 
     drawCaption (g, integrated ? "INPUT INTEGRATED  (BEFORE GAIN)" : "INPUT DIALOGUE  (BEFORE GAIN)", inputArea.withHeight (18));
@@ -462,7 +463,7 @@ void VOMeterEditor::resized()
     trimPanel = area;
     {
         auto inner = trimPanel.reduced (16, 10);
-        if (! integrated)   // Integrated mode (mastering a mix) has no trim
+        if (showTrim)   // a full mix (stereo / 5.1) has no trim
         {
             auto knobArea = inner.removeFromLeft (170);
             trimCaption = knobArea.removeFromTop (16);

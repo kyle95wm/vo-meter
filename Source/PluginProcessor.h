@@ -105,10 +105,12 @@ public:
     bool isFiveOneMix() const noexcept { return mixParam->load() > 0.5f; }
     void setMixFormat (bool fiveOne);
 
-    // Stereo and 5.1 tracks: measure dialogue-gated loudness (narration) or
-    // integrated loudness (mastering a mix; no trim there, only Match gain). Asked once, saved with the session.
+    // Mono tracks are a narration, ridden with the trim. Stereo and 5.1 tracks
+    // are a full mix being mastered: no trim (Match gain only), and they ask
+    // whether the spec is dialogue-gated (e.g. Netflix) or integrated (e.g. EBU R128). Asked once, saved with the session.
     // Mono tracks are narration: always dialogue-gated. Message thread only.
     bool asksMeasureMode() const noexcept { return ! isMonoTrack(); }
+    bool hasTrim() const noexcept { return isMonoTrack(); }
     bool isMeasureModeChosen() const;
     bool isIntegratedMode() const noexcept { return asksMeasureMode() && measureParam->load() > 0.5f; }
     void setMeasureMode (bool integrated);

@@ -4,8 +4,9 @@ A loudness finisher for the end of a voice-over track. It measures the **dialogu
 integrated loudness** of your narration and, through a side chain, of the programme (OV)
 it sits in. **Match** lands the narration on the target, and an automatable **Trim** lets you
 ride it from there. A true-peak limiter holds the output under **-2.5 dBTP**. On a stereo or
-5.1 bus it can instead measure standard **integrated loudness**, to master a whole mix to a
-target. It works on mono, stereo and 5.1 tracks. It is available as a VST3 on all platforms,
+5.1 mix bus it masters the whole mix to a target, measured either dialogue-gated (Netflix) or
+as standard **integrated loudness** (EBU R128, ATSC A/85). It works on mono, stereo and 5.1
+tracks. It is available as a VST3 on all platforms,
 plus an AU on macOS.
 
 ![VOMeter plugin window](docs/screenshot.png)
@@ -38,17 +39,18 @@ Presets menu. Stereo and 5.1 tracks aren't asked this, because it makes no diffe
 The stereo offset assumes Logic's default pan law, where a centre-panned mono track stays at
 unity in each channel. With the plain "-3 dB" pan law there's no offset, so answer 5.1.
 
-**Mastering a mix to a target.** On a stereo or 5.1 track, VOMeter asks once instead:
+**Mastering a mix to a target.** A stereo or 5.1 track is treated as a full mix. Put VOMeter
+last on the mix bus, play or bounce the mix, and press **Match**. A mix is mastered with one
+fixed gain, so there's no trim: the knob is hidden, and any trim value or automation is
+ignored. VOMeter asks once which measurement your delivery spec uses:
 **What should VOMeter measure?**
-- **Dialogue-gated** is for a stereo narration or dialogue stem, as above.
-- **Integrated** is for a mix bus or master. Every reading switches to standard BS.1770
-  integrated loudness of the whole signal: the big readout, the input reading, Match and
-  the programme's **Use**.
+- **Dialogue-gated**: only speech counts. Netflix and other dialogue-based specs measure mixed
+  content this way (Netflix: -27 LKFS dialogue-gated).
+- **Integrated**: the whole mix, standard BS.1770 (EBU R128, ATSC A/85). Every reading
+  switches over: the big readout, the input reading, Match and the programme's **Use**.
 
-Put VOMeter last on the bus, play or bounce the mix, and press **Match**. There's no trim in
-this mode: a mix is mastered with one fixed gain, so the knob is hidden and any trim value or
-automation is ignored. Both readings are measured all the time, so you can switch
-between them in the **Measure** section of the Presets menu without losing the pass.
+Both readings are measured all the time, so you can switch between them in the **Measure**
+section of the Presets menu without losing the pass.
 
 **How Logic's side chain works:** a side chain taken from a track is post-insert and
 pre-fader. VOMeter hears the OV after its plug-ins (including VODucker's ducking, hence the
@@ -90,7 +92,7 @@ duck harder; riding the narration fader doesn't.
 | Use | Sets the target to the programme's dialogue loudness from the side chain |
 | Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB, then resets the meter. It never touches the trim. |
 | Clear | Sets the Match gain back to 0 dB and resets the meter |
-| Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. Hidden and ignored in Integrated mode. |
+| Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. Mono tracks only: hidden and ignored on stereo and 5.1 tracks (a full mix). |
 | Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
 | Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
 

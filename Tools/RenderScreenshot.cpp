@@ -1,7 +1,8 @@
 // Renders the plugin editor to a PNG without a host, for the README.
 //   cmake -B build -DVO_METER_BUILD_SCREENSHOT_TOOL=ON && cmake --build build --target VOMeterScreenshot
 //   ./build/VOMeterScreenshot_artefacts/Release/VOMeterScreenshot docs/screenshot.png [--ask] [--integrated]
-// --ask shows the one-time question; --integrated renders a stereo track in Integrated mode.
+// --ask shows the one-time question; --stereo renders a stereo mix (dialogue-gated);
+// --integrated renders a stereo mix in Integrated mode.
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include <cstdio>
@@ -14,11 +15,12 @@ int main (int argc, char** argv)
                                .getChildFile (argc > 1 ? argv[1] : "docs/screenshot.png");
 
     VOMeterProcessor processor;
-    bool showQuestion = false, integrated = false;
+    bool showQuestion = false, integrated = false, stereoMix = false;
     for (int i = 2; i < argc; ++i)
     {
         showQuestion = showQuestion || juce::String (argv[i]) == "--ask";
         integrated = integrated || juce::String (argv[i]) == "--integrated";
+        stereoMix = stereoMix || juce::String (argv[i]) == "--stereo";
     }
 
     // Play 20 s of a voice-like demo signal (syllables and pauses) through it,
@@ -28,15 +30,15 @@ int main (int argc, char** argv)
         const double sr = 48000.0;
         // A mono narration track (as in Logic), with the stereo programme side chain;
         // or a stereo track measured integrated.
-        const auto mainSet = integrated ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
+        const auto mainSet = (integrated || stereoMix) ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
         juce::AudioProcessor::BusesLayout layout;
         layout.inputBuses.add (mainSet);
         layout.inputBuses.add (juce::AudioChannelSet::stereo());
         layout.outputBuses.add (mainSet);
         processor.setBusesLayout (layout);
         processor.prepareToPlay (sr, 512);
-        if (integrated && ! showQuestion)
-            processor.setMeasureMode (true);
+        if ((integrated || stereoMix) && ! showQuestion)
+            processor.setMeasureMode (integrated);
         juce::AudioBuffer<float> demo (1, (int) (20.0 * sr));
         juce::Random rng (7);
         for (int i = 0; i < demo.getNumSamples(); ++i)
@@ -78,7 +80,7 @@ int main (int argc, char** argv)
     }
 
     // The README shot shows an answered "stereo or 5.1?" question; --ask shows the question.
-    if (! showQuestion && ! integrated)
+    if (! showQuestion && ! integrated && ! stereoMix)
         processor.setMixFormat (false);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());

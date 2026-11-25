@@ -291,10 +291,10 @@ void testLatencyAndTransparency()
 
 void testTrimGain()
 {
-    // Promise: the trim is a plain gain change, in dB.
-    auto p = makeProcessor (48000.0, 2);
+    // Promise: on a mono (narration) track the trim is a plain gain change, in dB.
+    auto p = makeProcessor (48000.0, 1);
     setParam (*p, VOMeterProcessor::trimId, -6.0f);
-    const auto in = sine (48000.0, 2, 1.0, 1000.0, -20.0f);
+    const auto in = sine (48000.0, 1, 1.0, 1000.0, -20.0f);
     const auto out = process (*p, in);
     const int half = out.getNumSamples() / 2;
     const float gainDb = juce::Decibels::gainToDecibels (out.getMagnitude (0, half, half) / in.getMagnitude (0, half, half));
@@ -321,7 +321,7 @@ void testTruePeakCeiling()
                 for (float trimDb : { 0.0f, 18.0f })
                 {
                     auto p = makeProcessor (sr, ch);
-                    setParam (*p, VOMeterProcessor::trimId, trimDb);
+                    setParam (*p, VOMeterProcessor::matchId, trimDb);
                     const auto out = process (*p, *sig);
                     const float tp = referenceTruePeakDb (out, -6.0f);
                     CHECK (tp <= -2.5f, "true peak %.3f dBTP above -2.5 (%.0f Hz, %d ch, trim %+.0f, %s)",
@@ -436,10 +436,10 @@ void testTrimRidesOnTopOfMatch()
     // place, Match still lands "trim at 0 dB" on the target, keeps the ride,
     // and the output sits 3 LU above the target. The suggestion doesn't depend
     // on the trim.
-    auto p = makeProcessor (48000.0, 2);
+    auto p = makeProcessor (48000.0, 1);
     setParam (*p, VOMeterProcessor::targetId, -27.0f);
     setParam (*p, VOMeterProcessor::trimId, 3.0f);
-    const auto take = synthNarration (48000.0, 2, 30.0, -12.0f, 11);
+    const auto take = synthNarration (48000.0, 1, 30.0, -12.0f, 11);
     process (*p, take);
     const float before = p->getSuggestedMatchDb();
     p->applySuggestedMatch();
@@ -712,25 +712,31 @@ void testIntegratedMode()
     process (*p, mixSig);
     CHECK (std::abs (r.outLoudness.load() + 23.0f) < 0.3f, "Match in integrated mode read %.2f, expected -23", r.outLoudness.load());
 
-    // No trim when mastering a mix: a trim value (or automation) changes nothing.
+    // No trim on a full mix (stereo / 5.1), dialogue-gated or integrated: a
+    // trim value (or automation) changes nothing, and the knob is hidden.
+    for (int ch : { 2, 6 })
+    for (bool integ : { false, true })
     {
-        auto a = makeProcessor (sr, 2), b = makeProcessor (sr, 2);
-        a->setMeasureMode (true); b->setMeasureMode (true);
+        const auto sig = ch == 2 ? mixSig : [&] { auto x = silence (6, mixSig.getNumSamples());
+                                                  x.copyFrom (0, 0, mixSig, 0, 0, x.getNumSamples());
+                                                  x.copyFrom (2, 0, mixSig, 1, 0, x.getNumSamples()); return x; }();
+        auto a = makeProcessor (sr, ch), b = makeProcessor (sr, ch);
+        a->setMeasureMode (integ); b->setMeasureMode (integ);
         setParam (*b, VOMeterProcessor::trimId, 6.0f);
         a->prepareToPlay (sr, kBlock); b->prepareToPlay (sr, kBlock);
-        const auto oa = process (*a, mixSig), ob = process (*b, mixSig);
+        const auto oa = process (*a, sig), ob = process (*b, sig);
         float diff = 0;
-        for (int c = 0; c < 2; ++c)
+        for (int c = 0; c < ch; ++c)
             for (int i = 0; i < oa.getNumSamples(); ++i)
                 diff = std::max (diff, std::abs (oa.getSample (c, i) - ob.getSample (c, i)));
-        CHECK (diff < 1.0e-7f, "the trim should be ignored in integrated mode (diff %g)", diff);
+        CHECK (diff < 1.0e-7f, "the trim should be ignored on a %d-channel mix (diff %g, %s)", ch, diff, integ ? "integrated" : "dialogue-gated");
        #if ! JUCE_LINUX
         std::unique_ptr<juce::AudioProcessorEditor> e (b->createEditor());
         bool knobShown = false;
         for (auto* c : e->getChildren())
             if (auto* sl = dynamic_cast<juce::Slider*> (c))
                 knobShown = knobShown || sl->isVisible();
-        CHECK (! knobShown, "the trim knob should be hidden in integrated mode");
+        CHECK (! knobShown, "the trim knob should be hidden on a %d-channel mix", ch);
        #endif
     }
 
@@ -799,7 +805,7 @@ void testFiveOne()
     CHECK (err < 1.0e-6f, "0 dB should be transparent on 5.1 (err %g)", err);
 
     auto hot = makeProcessor (sr, 6);
-    setParam (*hot, VOMeterProcessor::trimId, 18.0f);
+    setParam (*hot, VOMeterProcessor::matchId, 18.0f);
     const auto hotOut = process (*hot, in);
     const float tp = referenceTruePeakDb (hotOut, -6.0f);
     CHECK (tp <= -2.5f, "5.1 true peak %.3f dBTP above -2.5", tp);
@@ -810,7 +816,7 @@ void testBypass()
     // Promise: Bypass gives back the input bit for bit (after the reported
     // latency, even with the trim up), and it is the host's bypass too.
     auto p = makeProcessor (48000.0, 2);
-    setParam (*p, VOMeterProcessor::trimId, 12.0f);
+    setParam (*p, VOMeterProcessor::matchId, 12.0f);
     setParam (*p, VOMeterProcessor::bypassId, 1.0f);
     p->prepareToPlay (48000.0, kBlock);
     const auto in = synthNarration (48000.0, 2, 2.0, -3.0f, 9);
@@ -866,7 +872,8 @@ void testEditorAndAltClick()
         return;
     }
    #endif
-    auto p = makeProcessor (48000.0, 2);
+    auto p = makeProcessor (48000.0, 1);   // the trim is on mono (narration) tracks
+    p->setMixFormat (false);
     setParam (*p, VOMeterProcessor::trimId, 9.0f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (p->createEditor());
     CHECK (editor != nullptr && editor->getWidth() > 0, "editor failed to open");
