@@ -131,7 +131,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     for (int c = 0; c < vometer::kMaxChannels; ++c)
         levelDb[c] = holdDb[c] = -100.0f;
 
-    setSize (520 + kMeterStripWidth + 10, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36);
+    setSize (520 + kMeterStripWidth + 10, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36 - 80 + 24);
     startTimerHz (kFrameRate);
     timerCallback();
 }
@@ -280,7 +280,7 @@ void VOMeterEditor::timerCallback()
     const bool showProgramme = audioProcessor.isMonoTrack() && (progSignal || ! std::isnan (progLufs));
     useProgrammeButton.setVisible (showProgramme);
     useProgrammeButton.setEnabled (! std::isnan (progLufs));
-    repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel).getUnion (meterPanel));
+    repaint (loudPanel.getUnion (trimPanel).getUnion (meterPanel));
 }
 
 void VOMeterEditor::paint (juce::Graphics& g)
@@ -289,7 +289,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // No subtitle line (the user prefers the plain title); resized() closes up its row.
     brand::drawHeader (g, getLocalBounds(), JucePlugin_Name, UpdateChecker::getCurrentVersion(), {});
 
-    for (auto panel : { loudPanel, statsPanel, trimPanel, meterPanel })
+    for (auto panel : { loudPanel, trimPanel, meterPanel })
     {
         g.setColour (brand::panel);
         g.fillRoundedRectangle (panel.toFloat(), 8.0f);
@@ -380,16 +380,15 @@ void VOMeterEditor::paint (juce::Graphics& g)
         g.drawText (hint, hintArea, juce::Justification::centredLeft);
     }
 
-    // ---- Stats row ----------------------------------------------------------
+    // LRA and speech share, under the big readout.
     {
-        auto row = statsPanel.reduced (14, 10);
-        const int w = row.getWidth() / 2;
+        auto row = statsArea;
         auto tile = [&] (const juce::String& caption, const juce::String& text, juce::Colour ink)
         {
-            auto t = row.removeFromLeft (w);
-            drawCaption (g, caption, t.removeFromTop (18));
+            auto t = row.removeFromLeft (110);
+            drawCaption (g, caption, t.removeFromTop (16));
             g.setColour (ink);
-            g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
             g.drawText (text, t, juce::Justification::centredLeft);
             return t;
         };
@@ -451,12 +450,14 @@ void VOMeterEditor::resized()
     area.removeFromRight (10);
 
     // Loudness panel
-    loudPanel = area.removeFromTop (186);
+    loudPanel = area.removeFromTop (210);
     {
         auto inner = loudPanel.reduced (16, 12);
         hintArea = inner.removeFromBottom (18);
+        inner.removeFromBottom (8);
         auto right = inner.removeFromRight (204);
         bigReadout = inner;
+        statsArea = bigReadout.removeFromBottom (38);
         targetCaption = right.removeFromTop (18);
         auto targetRow = right.removeFromTop (44);
         presetButton.setBounds (targetRow.removeFromRight (64).withSizeKeepingCentre (64, 26));
@@ -469,8 +470,6 @@ void VOMeterEditor::resized()
     }
     area.removeFromTop (10);
 
-    statsPanel = area.removeFromTop (70);
-    area.removeFromTop (10);
 
     trimPanel = area;
     {

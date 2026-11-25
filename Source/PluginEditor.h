@@ -7,10 +7,9 @@
 
 // Window layout (see CONVENTIONS.md):
 //   header   - plugin name and version (no subtitle)
-//   loudness - big output LUFS (dialogue-gated, or integrated when mastering a mix),
+//   loudness - big output LUFS (dialogue-gated or integrated), LRA and speech share under it,
 //              editable target (green when on target), programme loudness from
 //              the sidechain + Use (as target; mono narration tracks only)
-//   stats    - LRA, speech share
 //   meters   - strip down the right: output peak per channel (with the -2.5 dBTP
 //              ceiling and a peak hold) and the limiter's gain reduction, with
 //              the max true peak since reset and the gain reduction as numbers
@@ -162,8 +161,8 @@ private:
     juce::AudioProcessorValueTreeState::ButtonAttachment bypassAttachment;
 
     // Areas laid out in resized(), painted in paint().
-    juce::Rectangle<int> loudPanel, bigReadout, targetCaption, statusArea, programmeArea, hintArea;
-    juce::Rectangle<int> statsPanel, trimPanel, trimCaption, inputArea, suggestArea, meterPanel;
+    juce::Rectangle<int> loudPanel, bigReadout, statsArea, targetCaption, statusArea, programmeArea, hintArea;
+    juce::Rectangle<int> trimPanel, trimCaption, inputArea, suggestArea, meterPanel;
 
     // Meter ballistics (dB): instant rise, then fall; the hold line waits, then falls.
     float levelDb[vometer::kMaxChannels], holdDb[vometer::kMaxChannels], holdAge[vometer::kMaxChannels] {};
