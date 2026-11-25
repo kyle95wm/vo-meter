@@ -106,7 +106,7 @@ public:
     void setMixFormat (bool fiveOne);
 
     // Stereo and 5.1 tracks: measure dialogue-gated loudness (narration) or
-    // integrated loudness (mastering a mix). Asked once, saved with the session.
+    // integrated loudness (mastering a mix; no trim there, only Match gain). Asked once, saved with the session.
     // Mono tracks are narration: always dialogue-gated. Message thread only.
     bool asksMeasureMode() const noexcept { return ! isMonoTrack(); }
     bool isMeasureModeChosen() const;

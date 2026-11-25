@@ -712,6 +712,28 @@ void testIntegratedMode()
     process (*p, mixSig);
     CHECK (std::abs (r.outLoudness.load() + 23.0f) < 0.3f, "Match in integrated mode read %.2f, expected -23", r.outLoudness.load());
 
+    // No trim when mastering a mix: a trim value (or automation) changes nothing.
+    {
+        auto a = makeProcessor (sr, 2), b = makeProcessor (sr, 2);
+        a->setMeasureMode (true); b->setMeasureMode (true);
+        setParam (*b, VOMeterProcessor::trimId, 6.0f);
+        a->prepareToPlay (sr, kBlock); b->prepareToPlay (sr, kBlock);
+        const auto oa = process (*a, mixSig), ob = process (*b, mixSig);
+        float diff = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < oa.getNumSamples(); ++i)
+                diff = std::max (diff, std::abs (oa.getSample (c, i) - ob.getSample (c, i)));
+        CHECK (diff < 1.0e-7f, "the trim should be ignored in integrated mode (diff %g)", diff);
+       #if ! JUCE_LINUX
+        std::unique_ptr<juce::AudioProcessorEditor> e (b->createEditor());
+        bool knobShown = false;
+        for (auto* c : e->getChildren())
+            if (auto* sl = dynamic_cast<juce::Slider*> (c))
+                knobShown = knobShown || sl->isVisible();
+        CHECK (! knobShown, "the trim knob should be hidden in integrated mode");
+       #endif
+    }
+
     // Programme on the side chain: Use takes its integrated loudness.
     auto q = makeProcessor (sr, 2);
     q->setMeasureMode (true);

@@ -45,8 +45,9 @@ unity in each channel. With the plain "-3 dB" pan law there's no offset, so answ
   integrated loudness of the whole signal: the big readout, the input reading, Match and
   the programme's **Use**.
 
-Put VOMeter last on the bus and play or bounce the mix. Press **Match**, then use the trim for
-any rides, as with narration. Both readings are measured all the time, so you can switch
+Put VOMeter last on the bus, play or bounce the mix, and press **Match**. There's no trim in
+this mode: a mix is mastered with one fixed gain, so the knob is hidden and any trim value or
+automation is ignored. Both readings are measured all the time, so you can switch
 between them in the **Measure** section of the Presets menu without losing the pass.
 
 **How Logic's side chain works:** a side chain taken from a track is post-insert and
@@ -89,7 +90,7 @@ duck harder; riding the narration fader doesn't.
 | Use | Sets the target to the programme's dialogue loudness from the side chain |
 | Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB, then resets the meter. It never touches the trim. |
 | Clear | Sets the Match gain back to 0 dB and resets the meter |
-| Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
+| Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. Hidden and ignored in Integrated mode. |
 | Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
 | Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
 

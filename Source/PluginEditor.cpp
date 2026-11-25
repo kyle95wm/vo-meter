@@ -214,7 +214,12 @@ void VOMeterEditor::timerCallback()
     if (resetPending && ! audioProcessor.meterResetPending())
         resetPending = false;
 
-    integrated = audioProcessor.isIntegratedMode();
+    if (const bool integ = audioProcessor.isIntegratedMode(); integ != integrated)
+    {
+        integrated = integ;   // no trim when mastering a mix: re-lay out the gain panel
+        trimKnob.setVisible (! integrated);
+        resized();
+    }
     outLufs = r.outLoudness.load();
     inLufs = r.inLoudness.load();
     lra = r.lra.load();
@@ -222,7 +227,7 @@ void VOMeterEditor::timerCallback()
     speechSec = r.speechSeconds.load();
     measuredSec = r.measuredSeconds.load();
     measuring = r.measuring.load();
-    trimMoved = r.trimMovedSinceReset.load();
+    trimMoved = r.trimMovedSinceReset.load() && ! integrated;
     matchMoved = r.matchMovedSinceReset.load();
     progLufs = r.programmeLoudness.load();
     progSignal = r.programmeSignal.load();
@@ -389,7 +394,8 @@ void VOMeterEditor::paint (juce::Graphics& g)
     }
 
     // ---- Trim panel ---------------------------------------------------------
-    drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
+    if (! integrated)
+        drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
 
     drawCaption (g, integrated ? "INPUT INTEGRATED  (BEFORE GAIN)" : "INPUT DIALOGUE  (BEFORE GAIN)", inputArea.withHeight (18));
     g.setColour (std::isnan (inLufs) ? brand::textDim : brand::textMain);
@@ -456,10 +462,13 @@ void VOMeterEditor::resized()
     trimPanel = area;
     {
         auto inner = trimPanel.reduced (16, 10);
-        auto knobArea = inner.removeFromLeft (170);
-        trimCaption = knobArea.removeFromTop (16);
-        trimKnob.setBounds (knobArea);
-        inner.removeFromLeft (20);
+        if (! integrated)   // Integrated mode (mastering a mix) has no trim
+        {
+            auto knobArea = inner.removeFromLeft (170);
+            trimCaption = knobArea.removeFromTop (16);
+            trimKnob.setBounds (knobArea);
+            inner.removeFromLeft (20);
+        }
         inputArea = inner.removeFromTop (48);
         inner.removeFromTop (6);
         suggestArea = inner.removeFromTop (48);
