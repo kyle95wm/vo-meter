@@ -143,7 +143,7 @@ void VOMeterEditor::showPresetMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
                         [this] (int result)
                         {
-                            if (result >= 1 && result <= numPresets)
+                            if (result >= 1 && result <= (int) std::size (presets))
                                 targetAttachment.setValueAsCompleteGesture (presets[result - 1].lufs);
                         });
 }
