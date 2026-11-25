@@ -52,8 +52,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
       footer (p.updateChecker),
       targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
                         [this] (float v) { targetLabel.setText (juce::String (v, 1), juce::dontSendNotification); repaint(); }),
-      trimAttachment (p.apvts, VOMeterProcessor::trimId, trimKnob),
-      bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton)
+      trimAttachment (p.apvts, VOMeterProcessor::trimId, trimKnob)
 {
     setLookAndFeel (&lnf);
 
@@ -108,9 +107,6 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     resetButton.setTooltip ("Clear all readings, including the programme's. The trim and Match gain are kept.");
     resetButton.onClick = [this] { audioProcessor.requestMeterReset(); resetPending = true; repaint(); };
 
-    brand::makePill (bypassButton, "ACTIVE", "BYPASSED");
-    bypassButton.setTooltip ("Bypass the trim and limiter (also linked to your DAW's bypass).");
-    addAndMakeVisible (bypassButton);
 
     addChildComponent (mixQuestion);
     mixQuestion.onAnswer = [this] (bool fiveOne)
@@ -131,7 +127,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     for (int c = 0; c < vometer::kMaxChannels; ++c)
         levelDb[c] = holdDb[c] = -100.0f;
 
-    setSize (520 + kMeterStripWidth + 10, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36 - 80 + 24);
+    setSize (520 + kMeterStripWidth + 10, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36 - 80 + 24 - 40);
     startTimerHz (kFrameRate);
     timerCallback();
 }
@@ -442,9 +438,7 @@ void VOMeterEditor::resized()
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
     mixQuestion.setBounds (getLocalBounds().withBottom (footer.getY() - 6));
     measureQuestion.setBounds (mixQuestion.getBounds());
-    area.removeFromBottom (6);
-    bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
-    area.removeFromBottom (12);
+    area.removeFromBottom (10);   // no Bypass pill: the DAW's bypass drives the bypass parameter
 
     meterPanel = area.removeFromRight (kMeterStripWidth);
     area.removeFromRight (10);

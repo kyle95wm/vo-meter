@@ -15,7 +15,6 @@
 //              the max true peak since reset and the gain reduction as numbers
 //   gain     - Trim knob (your ride; alt-click = 0 dB), input loudness, Match gain,
 //              Match / Clear / Reset Meter
-//   pills    - Bypass
 // A one-time question covers the body until it's answered: "stereo or 5.1 mix?"
 // on a mono track, "dialogue-gated or integrated?" on a stereo or 5.1 track.
 // Either answer can be changed later in the Presets menu.
@@ -152,13 +151,11 @@ private:
     juce::Slider trimKnob;
     juce::TextButton matchButton { "Match" }, clearMatchButton { "Clear" }, resetButton { "Reset Meter" };
     juce::TextButton useProgrammeButton { "Use" };
-    juce::ToggleButton bypassButton { "Bypass" };
     ChoiceQuestion mixQuestion, measureQuestion;
     UpdateFooter footer;
 
     juce::ParameterAttachment targetAttachment;
     juce::AudioProcessorValueTreeState::SliderAttachment trimAttachment;
-    juce::AudioProcessorValueTreeState::ButtonAttachment bypassAttachment;
 
     // Areas laid out in resized(), painted in paint().
     juce::Rectangle<int> loudPanel, bigReadout, statsArea, targetCaption, statusArea, programmeArea, hintArea;

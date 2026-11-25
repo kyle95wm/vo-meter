@@ -69,6 +69,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout VOMeterProcessor::createLayo
             .withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " LUFS"; })
             .withValueFromStringFunction ([] (const juce::String& s) { return s.retainCharacters ("+-.0123456789").getFloatValue(); })));
 
+    // No button in the window (0.3.0): it's the DAW's bypass, via getBypassParameter(),
+    // so the host's bypass is click-free and latency-compensated. Kept for saved sessions.
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { bypassId, 1 }, "Bypass", false));
 

@@ -94,7 +94,7 @@ duck harder; riding the narration fader doesn't.
 | Clear | Sets the Match gain back to 0 dB and resets the meter |
 | Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. Mono tracks only: hidden and ignored on stereo and 5.1 tracks (a full mix). |
 | Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
-| Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
+| Bypass | No button: use your DAW's bypass. VOMeter hands it its internal bypass, so it's click-free and latency-compensated (the output is bit-for-bit the input). |
 
 | Readout | Meaning |
 |---------|---------|
