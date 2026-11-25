@@ -1,58 +1,344 @@
 #include "PluginEditor.h"
 
+namespace
+{
+juce::String utf8 (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
+const char* kDash = "\xe2\x80\x94";   // em dash: "no reading yet"
+
+juce::String fmt (float v, int decimals = 1)
+{
+    if (std::abs (v) < 0.5f * std::pow (10.0f, (float) -decimals)) v = 0.0f;  // never "-0.0"
+    return juce::String (v, decimals);
+}
+
+juce::String signedDb (float v)
+{
+    if (std::abs (v) < 0.05f) v = 0.0f;
+    return (v > 0.0f ? "+" : "") + juce::String (v, 1) + " dB";
+}
+
+void drawCaption (juce::Graphics& g, const juce::String& text, juce::Rectangle<int> r,
+                  juce::Justification j = juce::Justification::centredLeft)
+{
+    g.setColour (brand::textDim);
+    g.setFont (juce::FontOptions (brand::captionSize, juce::Font::bold));
+    g.drawText (text, r, j);
+}
+
+void styleButton (juce::TextButton& b)
+{
+    b.setColour (juce::TextButton::buttonColourId, brand::track);
+    b.setColour (juce::TextButton::textColourOffId, brand::textMain);
+}
+} // namespace
+
 VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p),
       footer (p.updateChecker),
-      knobAttachment (p.apvts, VOMeterProcessor::gainId, knob),
+      targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
+                        [this] (float v) { targetLabel.setText (juce::String (v, 1), juce::dontSendNotification); repaint(); }),
+      trimAttachment (p.apvts, VOMeterProcessor::trimId, trimKnob),
       bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton)
 {
     setLookAndFeel (&lnf);
 
-    // Add controls *before* styling them: a slider builds its text box from the
-    // look-and-feel it can see at that moment, and before it has a parent that
-    // is the default one (you get a stray outline round the value).
-    addAndMakeVisible (knob);
-    knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    knob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
-                              juce::MathConstants<float>::pi * 2.75f, true);
-    knob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
-    knob.setDoubleClickReturnValue (true, 0.0);
-    knob.setVelocityBasedMode (false);
+    // Target: click to type a value, or pick a preset.
+    addAndMakeVisible (targetLabel);
+    targetLabel.setEditable (true, true, false);
+    targetLabel.setJustificationType (juce::Justification::centredLeft);
+    targetLabel.setFont (juce::FontOptions (30.0f, juce::Font::bold));
+    targetLabel.setColour (juce::Label::backgroundWhenEditingColourId, brand::bg);
+    targetLabel.setColour (juce::Label::textWhenEditingColourId, brand::textMain);
+    targetLabel.setColour (juce::Label::outlineWhenEditingColourId, brand::accent);
+    targetLabel.setColour (juce::TextEditor::highlightColourId, brand::accent.withAlpha (0.4f));
+    targetLabel.setTooltip ("Target dialogue loudness. Click and type a value (-36 to -10 LUFS).");
+    targetLabel.onTextChange = [this] { setTargetFromText (targetLabel.getText()); };
+    targetAttachment.sendInitialUpdate();
+
+    addAndMakeVisible (presetButton);
+    styleButton (presetButton);
+    presetButton.setTooltip ("Common delivery targets");
+    presetButton.onClick = [this] { showPresetMenu(); };
+
+    // Trim knob. Alt-click (and double-click) returns it to 0 dB.
+    addAndMakeVisible (trimKnob);
+    trimKnob.getProperties().set ("bipolar", true);
+    trimKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    trimKnob.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
+                                  juce::MathConstants<float>::pi * 2.75f, true);
+    trimKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 22);
+    trimKnob.setDoubleClickReturnValue (true, 0.0, juce::ModifierKeys::altModifier);
+    trimKnob.setVelocityBasedMode (false);
+    trimKnob.setTooltip ("Output trim, -18 to +18 dB (automatable). Alt-click or double-click for 0 dB.");
+
+    addAndMakeVisible (matchButton);
+    styleButton (matchButton);
+    matchButton.setTooltip ("Set the trim to the suggested value so the dialogue lands on the target.");
+    matchButton.onClick = [this] { audioProcessor.applySuggestedTrim(); };
+
+    addAndMakeVisible (resetButton);
+    styleButton (resetButton);
+    resetButton.setTooltip ("Clear the loudness, true-peak, LRA and speech readings. The trim is kept.");
+    resetButton.onClick = [this] { audioProcessor.requestMeterReset(); resetPending = true; repaint(); };
 
     brand::makePill (bypassButton, "ACTIVE", "BYPASSED");
-    bypassButton.setTooltip ("Bypass the processing (also linked to your DAW's bypass).");
+    bypassButton.setTooltip ("Bypass the trim and limiter (also linked to your DAW's bypass).");
     addAndMakeVisible (bypassButton);
 
     addAndMakeVisible (footer);
 
-    setSize (340, 480);
+    setSize (520, 600);
+    startTimerHz (20);
+    timerCallback();
 }
 
 VOMeterEditor::~VOMeterEditor()
 {
+    stopTimer();
     setLookAndFeel (nullptr);
+}
+
+void VOMeterEditor::setTargetFromText (const juce::String& text)
+{
+    const auto digits = text.retainCharacters ("+-.0123456789");
+    if (digits.containsAnyOf ("0123456789"))
+    {
+        float v = digits.getFloatValue();
+        if (v > 0.0f) v = -v;   // "24" means -24 LUFS
+        targetAttachment.setValueAsCompleteGesture (juce::jlimit (-36.0f, -10.0f, v));
+    }
+    targetLabel.setText (juce::String (audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load(), 1),
+                         juce::dontSendNotification);
+    repaint();
+}
+
+void VOMeterEditor::showPresetMenu()
+{
+    struct Preset { float lufs; const char* name; };
+    static const Preset presets[] = {
+        { -23.0f, "-23 LUFS  \xc2\xb7  EBU R128" },
+        { -24.0f, "-24 LKFS  \xc2\xb7  ATSC A/85" },
+        { -27.0f, "-27 LKFS  \xc2\xb7  Netflix dialogue" },
+    };
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&lnf);
+    const float current = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load();
+    int id = 1;
+    for (const auto& pr : presets)
+        menu.addItem (id++, utf8 (pr.name), true, std::abs (current - pr.lufs) < 0.05f);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
+                        [this] (int result)
+                        {
+                            if (result >= 1 && result <= 3)
+                                targetAttachment.setValueAsCompleteGesture (presets[result - 1].lufs);
+                        });
+}
+
+void VOMeterEditor::timerCallback()
+{
+    auto& r = audioProcessor.readings;
+    if (resetPending && ! audioProcessor.meterResetPending())
+        resetPending = false;
+
+    outLufs = r.outDialogue.load();
+    inLufs = r.inDialogue.load();
+    lra = r.lra.load();
+    tp = r.maxTruePeak.load();
+    speechSec = r.speechSeconds.load();
+    measuredSec = r.measuredSeconds.load();
+    measuring = r.measuring.load();
+    trimMoved = r.trimMovedSinceReset.load();
+    suggested = audioProcessor.getSuggestedTrimDb();
+    gr = std::max (r.limiterGr.load(), gr - 1.0f);   // hold, then fall 20 dB/s
+
+    if (resetPending)
+    {
+        outLufs = inLufs = lra = suggested = NAN;
+        tp = -INFINITY; speechSec = measuredSec = 0.0f; trimMoved = false;
+    }
+
+    const float target = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load();
+    const bool onTarget = ! std::isnan (outLufs) && std::abs (outLufs - target) <= vometer::kOnTargetLU;
+    targetLabel.setColour (juce::Label::textColourId, onTarget ? brand::good : brand::textMain);
+
+    matchButton.setEnabled (! std::isnan (suggested));
+    repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel));
 }
 
 void VOMeterEditor::paint (juce::Graphics& g)
 {
     g.fillAll (brand::bg);
-    // Non-ASCII subtitle text must go through CharPointer_UTF8 (see BrandLookAndFeel.h).
     brand::drawHeader (g, getLocalBounds(), JucePlugin_Name, UpdateChecker::getCurrentVersion(),
-                       juce::String (juce::CharPointer_UTF8 ("One knob  \xc2\xb7  describe the plugin here")));
+                       utf8 ("Dialogue-gated loudness  \xc2\xb7  trim  \xc2\xb7  -2.5 dBTP true-peak limiter"));
+
+    for (auto panel : { loudPanel, statsPanel, trimPanel })
+    {
+        g.setColour (brand::panel);
+        g.fillRoundedRectangle (panel.toFloat(), 8.0f);
+    }
+
+    // ---- Loudness panel -----------------------------------------------------
+    const float target = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::targetId)->load();
+    const bool valid = ! std::isnan (outLufs);
+    const float diff = valid ? outLufs - target : 0.0f;
+    const bool onTarget = valid && std::abs (diff) <= vometer::kOnTargetLU;
+
+    drawCaption (g, "DIALOGUE LOUDNESS  (OUTPUT)", bigReadout.withHeight (18));
+    auto big = bigReadout.withTrimmedTop (18);
+    const juce::Font bigFont (juce::FontOptions (54.0f, juce::Font::bold));
+    const auto value = valid ? fmt (outLufs) : utf8 (kDash);
+    g.setColour (valid ? brand::textMain : brand::textDim);
+    g.setFont (bigFont);
+    g.drawText (value, big, juce::Justification::centredLeft);
+    const int valueW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (bigFont, value));
+    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    g.setColour (brand::textDim);
+    g.drawText ("LUFS", big.withTrimmedLeft (valueW + 8).withTrimmedTop (20), juce::Justification::centredLeft);
+
+    drawCaption (g, "TARGET", targetCaption);
+    if (! targetLabel.isBeingEdited())
+    {
+        const auto tb = targetLabel.getBounds();
+        const int textW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (targetLabel.getFont(), targetLabel.getText()));
+        const int unitX = tb.getX() + targetLabel.getBorderSize().getLeft() + textW + 6;
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.setColour (brand::textDim);
+        g.drawText ("LUFS", juce::Rectangle<int> (unitX, tb.getY() + 6, 40, tb.getHeight() - 6), juce::Justification::centredLeft);
+    }
+
+    // Status chip under the target.
+    {
+        juce::String text;
+        juce::Colour fill = brand::track, ink = brand::textMain;
+        if (! valid)
+        {
+            text = measuring ? "WAITING FOR DIALOGUE" : "PRESS PLAY TO MEASURE";
+            ink = brand::textDim;
+        }
+        else if (onTarget)
+        {
+            text = "ON TARGET";
+            fill = brand::good; ink = brand::bg;
+        }
+        else
+        {
+            text = fmt (std::abs (diff)) + (diff > 0 ? " LU HIGH" : " LU LOW");
+        }
+        auto chip = statusArea.toFloat();
+        g.setColour (fill);
+        g.fillRoundedRectangle (chip, chip.getHeight() * 0.5f);
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (brand::pillSize, juce::Font::bold));
+        g.drawText (text, chip, juce::Justification::centred);
+    }
+
+    {
+        juce::String hint;
+        if (trimMoved)
+            hint = utf8 ("Trim moved during this reading  \xc2\xb7  reset and replay to re-check");
+        else if (valid)
+            hint = utf8 ("Green = within \xc2\xb1") + fmt (vometer::kOnTargetLU) + " LU of the target"
+                   + (measuring ? "" : utf8 ("  \xc2\xb7  paused"));
+        else
+            hint = utf8 ("Measures only while playing  \xc2\xb7  ignores pauses, breaths and room tone");
+        g.setColour (trimMoved ? brand::accent : brand::textDim);
+        g.setFont (juce::FontOptions (brand::captionSize));
+        g.drawText (hint, hintArea, juce::Justification::centredLeft);
+    }
+
+    // ---- Stats row ----------------------------------------------------------
+    {
+        auto row = statsPanel.reduced (14, 10);
+        const int w = row.getWidth() / 4;
+        auto tile = [&] (const juce::String& caption, const juce::String& text, juce::Colour ink)
+        {
+            auto t = row.removeFromLeft (w);
+            drawCaption (g, caption, t.removeFromTop (18));
+            g.setColour (ink);
+            g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+            g.drawText (text, t, juce::Justification::centredLeft);
+            return t;
+        };
+
+        const bool tpValid = std::isfinite (tp);
+        const bool tpOver = tpValid && tp > vometer::kCeilingDbTP + 0.05f;
+        tile ("MAX TRUE PEAK", tpValid ? fmt (tp) + " dBTP" : utf8 (kDash), tpOver ? brand::warn : (tpValid ? brand::textMain : brand::textDim));
+
+        const bool limiting = gr > 0.1f;
+        auto grTile = tile ("LIMITER", limiting ? "-" + fmt (gr) + " dB" : "0.0 dB", limiting ? brand::warn : brand::textMain);
+        auto bar = grTile.removeFromBottom (4).withTrimmedRight (16).toFloat();
+        g.setColour (brand::track);
+        g.fillRoundedRectangle (bar, 2.0f);
+        g.setColour (brand::warn);
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * juce::jlimit (0.0f, 1.0f, gr / 12.0f)), 2.0f);
+
+        tile ("LRA", std::isnan (lra) ? utf8 (kDash) : fmt (lra) + " LU", std::isnan (lra) ? brand::textDim : brand::textMain);
+
+        const bool hasTime = measuredSec > 0.05f;
+        tile ("SPEECH", hasTime ? juce::String (juce::roundToInt (100.0f * speechSec / measuredSec)) + "%" : utf8 (kDash),
+              hasTime ? brand::textMain : brand::textDim);
+    }
+
+    // ---- Trim panel ---------------------------------------------------------
+    drawCaption (g, "TRIM", trimCaption, juce::Justification::centred);
+
+    drawCaption (g, "INPUT DIALOGUE  (BEFORE TRIM)", inputArea.withHeight (18));
+    g.setColour (std::isnan (inLufs) ? brand::textDim : brand::textMain);
+    g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
+    g.drawText (std::isnan (inLufs) ? utf8 (kDash) : fmt (inLufs) + " LUFS", inputArea.withTrimmedTop (18), juce::Justification::centredLeft);
+
+    drawCaption (g, "SUGGESTED TRIM", suggestArea.withHeight (18));
+    g.setColour (std::isnan (suggested) ? brand::textDim : brand::accent);
+    g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
+    juce::String sug = std::isnan (suggested) ? utf8 (kDash) : signedDb (suggested);
+    if (! std::isnan (suggested) && std::abs (suggested) >= vometer::kTrimRangeDb - 0.01f)
+        sug += "  (limit)";
+    g.drawText (sug, suggestArea.withTrimmedTop (18), juce::Justification::centredLeft);
 }
 
 void VOMeterEditor::resized()
 {
     auto area = getLocalBounds().reduced (brand::margin);
-    area.removeFromTop (brand::headerHeight);
+    area.removeFromTop (brand::headerHeight + 8);
 
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
-    area.removeFromBottom (10);
+    area.removeFromBottom (6);
+    bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
+    area.removeFromBottom (12);
 
-    auto pills = area.removeFromBottom (36);
-    bypassButton.setBounds (pills.withSizeKeepingCentre (130, 30));
-    area.removeFromBottom (14);
+    // Loudness panel
+    loudPanel = area.removeFromTop (150);
+    {
+        auto inner = loudPanel.reduced (16, 12);
+        hintArea = inner.removeFromBottom (18);
+        auto right = inner.removeFromRight (190);
+        bigReadout = inner;
+        targetCaption = right.removeFromTop (18);
+        auto targetRow = right.removeFromTop (44);
+        presetButton.setBounds (targetRow.removeFromRight (64).withSizeKeepingCentre (64, 26));
+        targetLabel.setBounds (targetRow.withWidth (90));
+        right.removeFromTop (6);
+        statusArea = right.removeFromTop (28).withTrimmedRight (0);
+    }
+    area.removeFromTop (10);
 
-    knob.setBounds (area.withSizeKeepingCentre (std::min (area.getWidth(), area.getHeight()),
-                                                area.getHeight()));
+    statsPanel = area.removeFromTop (70);
+    area.removeFromTop (10);
+
+    trimPanel = area;
+    {
+        auto inner = trimPanel.reduced (16, 10);
+        auto knobArea = inner.removeFromLeft (170);
+        trimCaption = knobArea.removeFromTop (16);
+        trimKnob.setBounds (knobArea);
+        inner.removeFromLeft (20);
+        inputArea = inner.removeFromTop (48);
+        inner.removeFromTop (6);
+        suggestArea = inner.removeFromTop (48);
+        auto buttons = inner.removeFromBottom (30);
+        matchButton.setBounds (buttons.removeFromLeft (110));
+        buttons.removeFromLeft (10);
+        resetButton.setBounds (buttons.removeFromLeft (130));
+    }
 }

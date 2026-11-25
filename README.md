@@ -1,17 +1,65 @@
 # VOMeter
 
-One or two sentences on what VOMeter does and who it's for. It is available as a VST3 on all platforms, plus an AU on macOS.
+A loudness finisher for the end of a voice-over track: it measures the **dialogue-gated
+integrated loudness** of your VO, tells you how much trim gets it to your delivery target,
+and holds the output under **-2.5 dBTP** with a true-peak limiter. It is available as a VST3 on
+all platforms, plus an AU on macOS.
 
 ![VOMeter plugin window](docs/screenshot.png)
 
-Describe the problem it solves in a voice-over / audio-description session, and its main idea.
+Put it last on the narration track. Set the target (-24, -27, ...), play the take through
+once, press **Match**, then **Reset Meter** and play it again to confirm: the target turns
+green when the dialogue loudness is within ±2 LU of it.
+
+## What it measures
+
+- **Dialogue loudness** follows ITU-R BS.1770 (K-weighting, 400 ms blocks every 100 ms,
+  -70 LUFS absolute and -10 LU relative gates), but only blocks that a speech detector marks
+  as dialogue count. Pauses, breaths, room tone and steady sounds such as tones or noise beds
+  are left out. The detector looks at level above the noise floor, the share of energy in the
+  voice band (250 Hz to 3.5 kHz) and the syllable-by-syllable movement of the level. It is
+  *not* Dolby Dialogue Intelligence (which is proprietary), so expect small differences from
+  Dolby Media Meter on mixed programme. On clean VO the two methods agree closely.
+- The meter measures both the **output** (after trim and limiter; the big readout) and the
+  **input** (before trim). The input reading gives the suggested trim, so the suggestion stays
+  valid after you move the trim.
+- It measures **only while the transport plays**. It runs over the whole pass (it is a true
+  integrated reading with no time window) until you press Reset Meter.
+- On plain BS.1770 the meter agrees with the EBU Tech 3341 test signals and with
+  `ffmpeg -af ebur128` to within 0.1 LU.
 
 ## Controls
 
 | Control | What it does |
 |---------|--------------|
-| Gain    | Replace with the plugin's real controls |
-| Bypass  | Click-free bypass, also linked to your DAW's bypass |
+| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset: -23 (EBU R128), -24 (ATSC A/85), -27 (Netflix dialogue). Shown in green when the output is within ±2 LU of it. |
+| Trim | Output gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
+| Match | Sets Trim to the suggested value (target minus the input's dialogue loudness), as one undoable move. |
+| Reset Meter | Clears the loudness, max true peak, LRA and speech readings. It doesn't touch the trim. |
+| Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
+
+| Readout | Meaning |
+|---------|---------|
+| Dialogue loudness | Dialogue-gated integrated loudness of the output since the last reset |
+| Max true peak | Highest output true peak since the reset (8× oversampled) |
+| Limiter | Current gain reduction of the -2.5 dBTP limiter; red while it is working |
+| LRA | Loudness range of the output (EBU Tech 3342) |
+| Speech | Share of the measured time that counted as dialogue |
+| Input dialogue / Suggested trim | Dialogue loudness before the trim, and the trim that would land it on the target (limited to ±18 dB) |
+
+**Limiter:** a stereo-linked lookahead brickwall limiter. It detects inter-sample peaks with
+8× oversampling and holds the output at -2.55 dBTP, a 0.05 dB margin so other true-peak meters
+agree. It adds about 1.8 ms of latency, which the plugin reports to the host. On normal VO
+levels it does nothing until a peak would cross the ceiling.
+
+**Tips**
+
+- If you move the trim (or automate it) during a pass, the output reading mixes the
+  settings. The window says so; reset and replay for a clean number.
+- If the suggested trim shows "(limit)", the take needs more than ±18 dB. Fix the gain
+  earlier in the chain.
+- The test tool can measure a real file and render it at a target:
+  `VOMeterTest --render take.wav -24 -27` writes `take_VOMeter-24.wav` etc. and prints the readings.
 
 ## Install
 
