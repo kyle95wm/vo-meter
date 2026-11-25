@@ -27,12 +27,14 @@ as a VST3 on all platforms, plus an AU on macOS.
 
 **Mono narration in a stereo mix.** A mono track panned centre plays in both channels of a
 stereo mix, and BS.1770 then measures it 3 dB louder than the mono track on its own: a
-narration track reading -30 sits at -27 in the mix. On a mono track VOMeter shows a
-**STEREO MIX / 5.1 MIX** switch. In Stereo (the default) every narration reading is given
-as heard in the stereo mix, so you use the programme's own target (-27 for a -27 OV).
-In 5.1 the narration goes to the centre channel alone, so there's no offset. This assumes
-Logic's default pan law, where a centre-panned mono track stays at unity in each channel.
-With the plain "-3 dB" pan law there is no offset, so use 5.1 mode there.
+narration track reading -30 sits at -27 in the mix. In a 5.1 mix it goes to the centre
+channel alone, with no offset. So on a mono track, VOMeter asks once, when you first open it:
+**Is this mix stereo or 5.1?** The answer is saved with the session. From then on every
+narration reading is given as heard in that mix, so you always use the programme's own target
+(-27 for a -27 OV). To change the answer, use the **Mix** section at the bottom of the
+Presets menu. Stereo tracks are never asked, because the answer makes no difference to them.
+The stereo offset assumes Logic's default pan law, where a centre-panned mono track stays at
+unity in each channel. With the plain "-3 dB" pan law there's no offset, so answer 5.1.
 
 **How Logic's side chain works:** a side chain taken from a track is post-insert and
 pre-fader. VOMeter hears the OV after its plug-ins (including VODucker's ducking, hence the
@@ -64,13 +66,12 @@ duck harder; riding the narration fader doesn't.
 
 | Control | What it does |
 |---------|--------------|
-| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). Shown in green when the output is within ±2 LU of it. |
+| Target | Dialogue loudness to aim for, -36 to -10 LUFS (default -24). Click the number to type a value, or pick a preset. The menu is grouped into Broadcast: -23 (EBU R128) and -24 (ATSC A/85); Streaming: -27 (Netflix dialogue); and Online: -16 (Apple Podcasts) and -14 (Spotify / YouTube). On mono tracks it also has a Mix section (Stereo / 5.1). Shown in green when the output is within ±2 LU of it. |
 | Use | Sets the target to the programme's dialogue loudness from the side chain |
 | Match | Sets the **Match gain** (up to ±24 dB) so the narration lands on the target with the trim at 0 dB. It never touches the trim. |
 | Clear | Sets the Match gain back to 0 dB |
 | Trim | Your ride on top of the Match gain, -18 to +18 dB (default 0). Automatable. **Alt-click** (or double-click) resets it to 0 dB. |
 | Reset Meter | Clears every reading, including the programme's. It doesn't touch the trim, Match gain or target. |
-| Stereo mix / 5.1 mix | Mono tracks only: read the narration as heard in a stereo mix (+3 dB) or in a 5.1 centre channel (no offset) |
 | Bypass | Click-free bypass, also linked to your DAW's bypass. It is latency-compensated, so the output is bit-for-bit the input. |
 
 | Readout | Meaning |

@@ -39,8 +39,7 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
       targetAttachment (*p.apvts.getParameter (VOMeterProcessor::targetId),
                         [this] (float v) { targetLabel.setText (juce::String (v, 1), juce::dontSendNotification); repaint(); }),
       trimAttachment (p.apvts, VOMeterProcessor::trimId, trimKnob),
-      bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton),
-      mixAttachment (p.apvts, VOMeterProcessor::mixId, mixButton)
+      bypassAttachment (p.apvts, VOMeterProcessor::bypassId, bypassButton)
 {
     setLookAndFeel (&lnf);
 
@@ -99,11 +98,12 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
     bypassButton.setTooltip ("Bypass the trim and limiter (also linked to your DAW's bypass).");
     addAndMakeVisible (bypassButton);
 
-    brand::makePill (mixButton, "STEREO MIX", "5.1 MIX");
-    mixButton.setTooltip ("Mono track only. Stereo mix: readings are given as heard in a stereo mix, 3 dB above "
-                          "the mono track on its own (centre pan, both channels at unity), so the target is the "
-                          "programme's own. 5.1 mix: the narration is in the centre channel alone, no offset.");
-    addChildComponent (mixButton);
+    addChildComponent (mixQuestion);
+    mixQuestion.onAnswer = [this] (bool fiveOne)
+    {
+        audioProcessor.setMixFormat (fiveOne);
+        mixQuestion.setVisible (false);
+    };
 
     addAndMakeVisible (footer);
 
@@ -159,11 +159,23 @@ void VOMeterEditor::showPresetMenu()
         menu.addItem (i + 1, utf8 (pr.name), true, std::abs (current - pr.lufs) < 0.05f);
     }
 
+    // Mono tracks: how the narration is heard (asked once, changeable here).
+    constexpr int stereoId = 101, fiveOneId = 102;
+    if (audioProcessor.isMonoTrack())
+    {
+        const bool fiveOne = audioProcessor.isFiveOneMix();
+        menu.addSectionHeader ("Mix");
+        menu.addItem (stereoId, "Stereo mix (mono narration reads +3 dB)", true, ! fiveOne);
+        menu.addItem (fiveOneId, "5.1 mix (centre channel, no offset)", true, fiveOne);
+    }
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
                         [this] (int result)
                         {
                             if (result >= 1 && result <= (int) std::size (presets))
                                 targetAttachment.setValueAsCompleteGesture (presets[result - 1].lufs);
+                            else if (result == 101 || result == 102)
+                                audioProcessor.setMixFormat (result == 102);
                         });
 }
 
@@ -185,11 +197,11 @@ void VOMeterEditor::timerCallback()
     progLufs = r.programmeDialogue.load();
     progSignal = r.programmeSignal.load();
     matchDb = audioProcessor.apvts.getRawParameterValue (VOMeterProcessor::matchId)->load();
-    mixOffset = r.mixOffsetDb.load();
-    if (mixButton.isVisible() != audioProcessor.isMonoTrack())
+    const bool ask = audioProcessor.isMonoTrack() && ! audioProcessor.isMixFormatChosen();
+    if (mixQuestion.isVisible() != ask)
     {
-        mixButton.setVisible (audioProcessor.isMonoTrack());
-        resized();
+        mixQuestion.setVisible (ask);
+        if (ask) mixQuestion.toFront (false);
     }
     suggested = audioProcessor.getSuggestedMatchDb();
     gr = std::max (r.limiterGr.load(), gr - 1.0f);   // hold, then fall 20 dB/s
@@ -228,8 +240,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     const float diff = valid ? outLufs - target : 0.0f;
     const bool onTarget = valid && std::abs (diff) <= vometer::kOnTargetLU;
 
-    drawCaption (g, mixOffset > 0.0f ? "OUTPUT DIALOGUE  (STEREO MIX)" : "OUTPUT DIALOGUE",
-                 bigReadout.withHeight (18));
+    drawCaption (g, "OUTPUT DIALOGUE", bigReadout.withHeight (18));
     auto big = bigReadout.withTrimmedTop (18);
     const juce::Font bigFont (juce::FontOptions (54.0f, juce::Font::bold));
     const auto value = valid ? fmt (outLufs) : utf8 (kDash);
@@ -376,18 +387,9 @@ void VOMeterEditor::resized()
     area.removeFromTop (kTitleRowHeight + 10);
 
     footer.setBounds (area.removeFromBottom (brand::footerHeight));
+    mixQuestion.setBounds (getLocalBounds().withBottom (footer.getY() - 6));
     area.removeFromBottom (6);
-    {
-        auto pills = area.removeFromBottom (32);
-        if (mixButton.isVisible())
-        {
-            auto row = pills.withSizeKeepingCentre (130 * 2 + 12, 30);
-            bypassButton.setBounds (row.removeFromLeft (130));
-            mixButton.setBounds (row.removeFromRight (130));
-        }
-        else
-            bypassButton.setBounds (pills.withSizeKeepingCentre (130, 30));
-    }
+    bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
     area.removeFromBottom (12);
 
     // Loudness panel

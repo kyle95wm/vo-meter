@@ -87,8 +87,14 @@ public:
     // Sets the target to the programme's dialogue loudness (sidechain).
     bool useProgrammeAsTarget();
 
-    // True when this instance sits on a mono track (the Stereo/5.1 switch matters).
+    // True when this instance sits on a mono track (the Stereo/5.1 choice matters).
     bool isMonoTrack() const noexcept { return getMainBusNumInputChannels() == 1; }
+
+    // Whether the user has answered "stereo or 5.1 mix?" for this instance
+    // (saved with the session). Message thread only.
+    bool isMixFormatChosen() const;
+    bool isFiveOneMix() const noexcept { return mixParam->load() > 0.5f; }
+    void setMixFormat (bool fiveOne);
 
     // Direct access for the test tool (audio thread only).
     const vometer::LoudnessMeter& getMeter() const noexcept { return meter; }

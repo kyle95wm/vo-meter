@@ -597,6 +597,47 @@ void testMonoInStereoMix()
     CHECK (std::abs ((inMix - m->readings.mixOffsetDb.load()) + 30.0f) < 0.5f, "the mono track itself should be about -30");
 }
 
+void testMixQuestion()
+{
+    // Promise: a mono track asks "stereo or 5.1 mix?" once; the answer sets the
+    // mix, is saved with the session, and the question doesn't come back. A
+    // stereo track never asks.
+   #if JUCE_LINUX
+    if (juce::SystemStats::getEnvironmentVariable ("DISPLAY", {}).isEmpty())
+        return;
+   #endif
+    auto questionShown = [] (juce::AudioProcessorEditor& e)
+    {
+        for (auto* c : e.getChildren())
+            if (dynamic_cast<MixQuestion*> (c) != nullptr)
+                return c->isVisible();
+        return false;
+    };
+
+    auto mono = makeProcessor (48000.0, 1);
+    CHECK (! mono->isMixFormatChosen(), "a new mono instance hasn't been asked yet");
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> e (mono->createEditor());
+        CHECK (questionShown (*e), "a mono track should ask stereo or 5.1");
+    }
+    mono->setMixFormat (true);
+    CHECK (mono->isMixFormatChosen() && getParam (*mono, VOMeterProcessor::mixId) > 0.5f, "answering 5.1 should set the mix");
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> e (mono->createEditor());
+        CHECK (! questionShown (*e), "the question shouldn't come back once answered");
+    }
+
+    juce::MemoryBlock state;
+    mono->getStateInformation (state);
+    auto reopened = makeProcessor (48000.0, 1);
+    reopened->setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (reopened->isMixFormatChosen(), "the answer should be saved with the session");
+
+    auto stereo = makeProcessor (48000.0, 2);
+    std::unique_ptr<juce::AudioProcessorEditor> e (stereo->createEditor());
+    CHECK (! questionShown (*e), "a stereo track should never ask");
+}
+
 void testBypass()
 {
     // Promise: Bypass gives back the input bit for bit (after the reported
@@ -766,6 +807,7 @@ int main (int argc, char** argv)
     testStateRoundTrip();
     testVersionCompare();
     testEditorAndAltClick();
+    testMixQuestion();
 
     if (failures == 0)
         std::printf ("All VOMeter tests passed.\n");

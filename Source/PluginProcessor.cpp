@@ -263,6 +263,19 @@ void VOMeterProcessor::clearMatch()
     setAsGesture (apvts.getParameter (matchId), 0.0f);
 }
 
+static const juce::Identifier mixChosenProp { "mixChosen" };
+
+bool VOMeterProcessor::isMixFormatChosen() const
+{
+    return apvts.state.getProperty (mixChosenProp, false);
+}
+
+void VOMeterProcessor::setMixFormat (bool fiveOne)
+{
+    setAsGesture (apvts.getParameter (mixId), fiveOne ? 1.0f : 0.0f);
+    apvts.state.setProperty (mixChosenProp, true, nullptr);
+}
+
 bool VOMeterProcessor::useProgrammeAsTarget()
 {
     const float p = readings.programmeDialogue.load();

@@ -1,6 +1,6 @@
 // Renders the plugin editor to a PNG without a host, for the README.
 //   cmake -B build -DVO_METER_BUILD_SCREENSHOT_TOOL=ON && cmake --build build --target VOMeterScreenshot
-//   ./build/VOMeterScreenshot_artefacts/Release/VOMeterScreenshot docs/screenshot.png
+//   ./build/VOMeterScreenshot_artefacts/Release/VOMeterScreenshot docs/screenshot.png [--ask]
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include <cstdio>
@@ -65,6 +65,11 @@ int main (int argc, char** argv)
         processor.requestMeterReset();
         play();
     }
+
+    // The README shot shows an answered "stereo or 5.1?" question; --ask shows the question.
+    const bool showQuestion = argc > 2 && juce::String (argv[2]) == "--ask";
+    if (! showQuestion)
+        processor.setMixFormat (false);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     editor->setVisible (true);
