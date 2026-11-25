@@ -5,6 +5,10 @@ namespace
 juce::String utf8 (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
 const char* kDash = "\xe2\x80\x94";   // em dash: "no reading yet"
 constexpr int kTitleRowHeight = 28;     // brand::drawHeader's title row (no subtitle row here)
+constexpr int kMeterStripWidth = 120;   // output level + gain reduction meters, right side
+constexpr int kFrameRate = 30;          // editor refresh, Hz
+constexpr float kMeterFloorDb = -60.0f, kGrRangeDb = 12.0f;
+constexpr float kFallDbPerSec = 20.0f, kHoldSeconds = 1.5f;
 
 juce::String fmt (float v, int decimals = 1)
 {
@@ -124,8 +128,11 @@ VOMeterEditor::VOMeterEditor (VOMeterProcessor& p)
 
     addAndMakeVisible (footer);
 
-    setSize (520, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36);
-    startTimerHz (20);
+    for (int c = 0; c < vometer::kMaxChannels; ++c)
+        levelDb[c] = holdDb[c] = -100.0f;
+
+    setSize (520 + kMeterStripWidth + 10, 600 - (brand::headerHeight - kTitleRowHeight) + 2 + 36);
+    startTimerHz (kFrameRate);
     timerCallback();
 }
 
@@ -242,7 +249,19 @@ void VOMeterEditor::timerCallback()
     showIf (mixQuestion, audioProcessor.isMonoTrack() && ! audioProcessor.isMixFormatChosen());
     showIf (measureQuestion, audioProcessor.asksMeasureMode() && ! audioProcessor.isMeasureModeChosen());
     suggested = audioProcessor.getSuggestedMatchDb();
-    gr = std::max (r.limiterGr.load(), gr - 1.0f);   // hold, then fall 20 dB/s
+    // Live meters: instant rise, then fall at 20 dB/s; the hold line waits 1.5 s.
+    {
+        const float dt = 1.0f / kFrameRate, fall = kFallDbPerSec * dt;
+        meterChannels = juce::jlimit (1, vometer::kMaxChannels, r.numChannels.load());
+        for (int c = 0; c < meterChannels; ++c)
+        {
+            const float p = juce::Decibels::gainToDecibels (r.takeOutPeak (c), -100.0f);
+            levelDb[c] = std::max (p, levelDb[c] - fall);
+            if (p >= holdDb[c]) { holdDb[c] = p; holdAge[c] = 0.0f; }
+            else if ((holdAge[c] += dt) > kHoldSeconds) holdDb[c] -= fall;
+        }
+        gr = std::max (r.takeGrPeak(), gr - fall);
+    }
 
     if (resetPending)
     {
@@ -257,10 +276,11 @@ void VOMeterEditor::timerCallback()
     matchButton.setEnabled (! std::isnan (suggested));
     clearMatchButton.setEnabled (std::abs (matchDb) > 0.05f);
     // The programme row only appears once a side chain brings programme audio.
-    const bool showProgramme = progSignal || ! std::isnan (progLufs);
+    // Mono narration tracks only: on a full mix there's no programme to set a target from.
+    const bool showProgramme = audioProcessor.isMonoTrack() && (progSignal || ! std::isnan (progLufs));
     useProgrammeButton.setVisible (showProgramme);
     useProgrammeButton.setEnabled (! std::isnan (progLufs));
-    repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel));
+    repaint (loudPanel.getUnion (statsPanel).getUnion (trimPanel).getUnion (meterPanel));
 }
 
 void VOMeterEditor::paint (juce::Graphics& g)
@@ -269,7 +289,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // No subtitle line (the user prefers the plain title); resized() closes up its row.
     brand::drawHeader (g, getLocalBounds(), JucePlugin_Name, UpdateChecker::getCurrentVersion(), {});
 
-    for (auto panel : { loudPanel, statsPanel, trimPanel })
+    for (auto panel : { loudPanel, statsPanel, trimPanel, meterPanel })
     {
         g.setColour (brand::panel);
         g.fillRoundedRectangle (panel.toFloat(), 8.0f);
@@ -363,7 +383,7 @@ void VOMeterEditor::paint (juce::Graphics& g)
     // ---- Stats row ----------------------------------------------------------
     {
         auto row = statsPanel.reduced (14, 10);
-        const int w = row.getWidth() / 4;
+        const int w = row.getWidth() / 3;
         auto tile = [&] (const juce::String& caption, const juce::String& text, juce::Colour ink)
         {
             auto t = row.removeFromLeft (w);
@@ -378,21 +398,14 @@ void VOMeterEditor::paint (juce::Graphics& g)
         const bool tpOver = tpValid && tp > vometer::kCeilingDbTP + 0.05f;
         tile ("MAX TRUE PEAK", tpValid ? fmt (tp) + " dBTP" : utf8 (kDash), tpOver ? brand::warn : (tpValid ? brand::textMain : brand::textDim));
 
-        const bool limiting = gr > 0.1f;
-        // The -2.5 dBTP limiter's live gain reduction (held, then falling 20 dB/s).
-        auto grTile = tile ("GAIN REDUCTION", limiting ? "-" + fmt (gr) + " dB" : juce::String ("None"), limiting ? brand::warn : brand::textDim);
-        auto bar = grTile.removeFromBottom (4).withTrimmedRight (16).toFloat();
-        g.setColour (brand::track);
-        g.fillRoundedRectangle (bar, 2.0f);
-        g.setColour (brand::warn);
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * juce::jlimit (0.0f, 1.0f, gr / 12.0f)), 2.0f);
-
         tile ("LRA", std::isnan (lra) ? utf8 (kDash) : fmt (lra) + " LU", std::isnan (lra) ? brand::textDim : brand::textMain);
 
         const bool hasTime = measuredSec > 0.05f;
         tile ("SPEECH", hasTime ? juce::String (juce::roundToInt (100.0f * speechSec / measuredSec)) + "%" : utf8 (kDash),
               hasTime ? brand::textMain : brand::textDim);
     }
+
+    drawMeters (g);
 
     // ---- Trim panel ---------------------------------------------------------
     if (showTrim)
@@ -438,6 +451,9 @@ void VOMeterEditor::resized()
     bypassButton.setBounds (area.removeFromBottom (32).withSizeKeepingCentre (130, 30));
     area.removeFromBottom (12);
 
+    meterPanel = area.removeFromRight (kMeterStripWidth);
+    area.removeFromRight (10);
+
     // Loudness panel
     loudPanel = area.removeFromTop (186);
     {
@@ -480,4 +496,95 @@ void VOMeterEditor::resized()
         buttons.removeFromLeft (8);
         resetButton.setBounds (buttons.removeFromLeft (112));
     }
+}
+
+// The meter strip: output sample peak per channel (dBFS, -60 to 0, with the
+// limiter's ceiling and a peak-hold line) and the limiter's gain reduction
+// (0 to 12 dB, growing down from the top). Numbers underneath: the highest
+// held peak and the gain reduction right now.
+void VOMeterEditor::drawMeters (juce::Graphics& g)
+{
+    auto inner = meterPanel.reduced (10, 12);
+    auto captions = inner.removeFromTop (16);
+    auto numbers = inner.removeFromBottom (40);
+    inner.removeFromBottom (8);
+
+    auto scale = inner.removeFromLeft (24);
+    auto grBar = inner.removeFromRight (16);
+    inner.removeFromRight (8);
+    auto levels = inner;
+
+    drawCaption (g, "OUT", captions.withX (levels.getX()).withWidth (levels.getWidth()), juce::Justification::centred);
+    drawCaption (g, "GR", captions.withX (grBar.getX() - 6).withWidth (grBar.getWidth() + 12), juce::Justification::centred);
+
+    auto yFor = [&] (float db)
+    {
+        const float t = juce::jlimit (0.0f, 1.0f, (db - kMeterFloorDb) / -kMeterFloorDb);
+        return (float) levels.getBottom() - t * (float) levels.getHeight();
+    };
+
+    // Scale.
+    g.setFont (juce::FontOptions (10.0f));
+    for (float db : { 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -36.0f, -48.0f, -60.0f })
+    {
+        const float y = yFor (db);
+        g.setColour (brand::textDim);
+        g.drawText (juce::String ((int) db), juce::Rectangle<float> ((float) scale.getX(), y - 6.0f, (float) scale.getWidth() - 4.0f, 12.0f),
+                    juce::Justification::centredRight);
+        g.setColour (brand::track);
+        g.drawHorizontalLine (juce::roundToInt (y), (float) levels.getX(), (float) levels.getRight());
+    }
+
+    // Level bars.
+    const int gap = meterChannels > 2 ? 2 : 4;
+    const float barW = (float) (levels.getWidth() - gap * (meterChannels - 1)) / (float) meterChannels;
+    float maxHold = -100.0f;
+    for (int c = 0; c < meterChannels; ++c)
+    {
+        const auto bar = juce::Rectangle<float> ((float) levels.getX() + c * (barW + gap), (float) levels.getY(), barW, (float) levels.getHeight());
+        g.setColour (brand::track.withAlpha (0.6f));
+        g.fillRect (bar);
+        if (levelDb[c] > kMeterFloorDb)
+        {
+            g.setColour (brand::accent);
+            g.fillRect (bar.withTop (yFor (levelDb[c])));
+        }
+        if (holdDb[c] > kMeterFloorDb)
+        {
+            g.setColour (brand::textMain);
+            g.fillRect (bar.withTop (yFor (holdDb[c]) - 1.0f).withHeight (2.0f));
+        }
+        maxHold = std::max (maxHold, holdDb[c]);
+    }
+
+    // The limiter's ceiling.
+    g.setColour (brand::warn.withAlpha (0.8f));
+    g.drawHorizontalLine (juce::roundToInt (yFor (vometer::kCeilingDbTP)), (float) levels.getX() - 3.0f, (float) levels.getRight() + 3.0f);
+
+    // Gain reduction bar.
+    {
+        const auto bar = grBar.toFloat();
+        g.setColour (brand::track.withAlpha (0.6f));
+        g.fillRect (bar);
+        g.setColour (brand::track);
+        for (float db : { 3.0f, 6.0f, 9.0f })
+            g.drawHorizontalLine (juce::roundToInt (bar.getY() + bar.getHeight() * db / kGrRangeDb), bar.getX(), bar.getRight());
+        if (gr > 0.05f)
+        {
+            g.setColour (brand::warn);
+            g.fillRect (bar.withHeight (bar.getHeight() * juce::jlimit (0.0f, 1.0f, gr / kGrRangeDb)));
+        }
+    }
+
+    // Numbers.
+    auto line = [&] (const juce::String& caption, const juce::String& value, juce::Colour ink)
+    {
+        auto row = numbers.removeFromTop (20);
+        drawCaption (g, caption, row);
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.drawText (value, row, juce::Justification::centredRight);
+    };
+    line ("PEAK", maxHold > kMeterFloorDb ? fmt (maxHold) : utf8 (kDash), maxHold > kMeterFloorDb ? brand::textMain : brand::textDim);
+    line ("GR", gr > 0.05f ? "-" + fmt (gr) : juce::String ("0.0"), gr > 0.05f ? brand::warn : brand::textDim);
 }

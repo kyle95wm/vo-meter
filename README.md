@@ -47,7 +47,7 @@ ignored. VOMeter asks once which measurement your delivery spec uses:
 - **Dialogue-gated**: only speech counts. Netflix and other dialogue-based specs measure mixed
   content this way (Netflix: -27 LKFS dialogue-gated).
 - **Integrated**: the whole mix, standard BS.1770 (EBU R128, ATSC A/85). Every reading
-  switches over: the big readout, the input reading, Match and the programme's **Use**.
+  switches over: the big readout, the input reading and Match.
 
 Both readings are measured all the time, so you can switch between them in the **Measure**
 section of the Presets menu without losing the pass.
@@ -99,9 +99,10 @@ duck harder; riding the narration fader doesn't.
 | Readout | Meaning |
 |---------|---------|
 | Output dialogue (or integrated) | Loudness of the output since the last reset: dialogue-gated, or integrated in Integrated mode |
-| Programme | Loudness of the side-chain programme, measured the same way (dialogue-gated or integrated). Hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
+| Programme | Dialogue loudness of the side-chain programme, with **Use** to take it as the target. Mono narration tracks only (a full mix has no programme to follow), and hidden until a side chain brings programme audio (Logic's "None" sends the track's own audio, which VOMeter ignores) |
 | Max true peak | Highest output true peak since the reset (8× oversampled) |
-| Gain reduction | How many dB the -2.5 dBTP limiter is turning the audio down right now (held briefly, then falls back). Red while it is working; "None" when it isn't |
+| Level meter (OUT) | Output sample peak of each channel (1, 2 or 6 bars), -60 to 0 dBFS, with a peak-hold line and the -2.5 dBTP ceiling marked in red. PEAK underneath is the highest held peak. Runs whether or not the transport plays |
+| Gain reduction meter (GR) | How far the -2.5 dBTP limiter is turning the audio down right now, 0 to 12 dB, growing down from the top (falls back at 20 dB/s). GR underneath gives the number |
 | LRA | Loudness range of the output (EBU Tech 3342) |
 | Speech | Share of the measured time that counted as dialogue |
 | Input dialogue (or integrated) / Match gain | Loudness before any gain, the current Match gain, and what Match would set it to |

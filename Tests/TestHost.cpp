@@ -811,6 +811,67 @@ void testFiveOne()
     CHECK (tp <= -2.5f, "5.1 true peak %.3f dBTP above -2.5", tp);
 }
 
+void testLiveMeters()
+{
+    // Promise: the level meter shows each output channel's peak, the gain
+    // reduction meter shows the limiter working (and nothing when it isn't),
+    // and both run whether or not the transport plays.
+    const double sr = 48000.0;
+    for (int ch : { 1, 2, 6 })
+    {
+        auto p = makeProcessor (sr, ch);
+        auto in = silence (ch, (int) sr);
+        for (int c = 0; c < ch; ++c)
+        {
+            const auto t = sine (sr, 1, 1.0, 1000.0, -20.0f - 2.0f * c);
+            in.copyFrom (c, 0, t, 0, 0, in.getNumSamples());
+        }
+        process (*p, in);
+        auto& r = p->readings;
+        CHECK (r.numChannels.load() == ch, "meter should know the %d channels", ch);
+        for (int c = 0; c < ch; ++c)
+        {
+            const float db = juce::Decibels::gainToDecibels (r.takeOutPeak (c));
+            CHECK (std::abs (db - (-20.0f - 2.0f * c)) < 0.1f, "channel %d of %d peaked %.2f dBFS", c + 1, ch, db);
+        }
+        CHECK (r.takeOutPeak (0) == 0.0f, "taking a peak should start the next one afresh");
+        CHECK (r.takeGrPeak() < 0.01f, "no gain reduction expected on a -20 dBFS tone");
+
+        setParam (*p, VOMeterProcessor::matchId, 24.0f);
+        auto stopped = std::make_unique<TestPlayHead>();
+        stopped->playing = false;
+        p->setPlayHead (stopped.get());
+        process (*p, in);
+        CHECK (r.takeGrPeak() > 3.0f, "gain reduction should show while limiting, even when stopped");
+        const float out = juce::Decibels::gainToDecibels (r.takeOutPeak (0));
+        CHECK (out <= -2.5f && out > -4.0f, "limited output peaked %.2f dBFS", out);
+        p->setPlayHead (nullptr);
+    }
+}
+
+void testProgrammeRowOnlyOnMono()
+{
+    // Promise: the programme readout (and Use) shows only on a mono narration
+    // track; a full mix (stereo / 5.1) never shows it, side chain or not.
+   #if JUCE_LINUX
+    if (juce::SystemStats::getEnvironmentVariable ("DISPLAY", {}).isEmpty())
+        return;
+   #endif
+    const double sr = 48000.0;
+    const auto programme = synthNarration (sr, 2, 10.0, -10.0f, 40);
+    for (int ch : { 1, 2, 6 })
+    {
+        auto p = makeProcessor (sr, ch);
+        process (*p, synthNarration (sr, ch, 10.0, -12.0f, 41), kBlock, &programme);
+        std::unique_ptr<juce::AudioProcessorEditor> e (p->createEditor());
+        bool useShown = false;
+        for (auto* c : e->getChildren())
+            if (auto* b = dynamic_cast<juce::TextButton*> (c); b != nullptr && b->getButtonText() == "Use")
+                useShown = b->isVisible();
+        CHECK (useShown == (ch == 1), "programme row on a %d-channel track should be %s", ch, ch == 1 ? "shown" : "hidden");
+    }
+}
+
 void testBypass()
 {
     // Promise: Bypass gives back the input bit for bit (after the reported
@@ -985,6 +1046,8 @@ int main (int argc, char** argv)
     testEditorAndAltClick();
     testMixQuestion();
     testMeasureQuestion();
+    testLiveMeters();
+    testProgrammeRowOnlyOnMono();
     testIntegratedMode();
     testFiveOne();
 

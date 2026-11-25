@@ -2,7 +2,8 @@
 //   cmake -B build -DVO_METER_BUILD_SCREENSHOT_TOOL=ON && cmake --build build --target VOMeterScreenshot
 //   ./build/VOMeterScreenshot_artefacts/Release/VOMeterScreenshot docs/screenshot.png [--ask] [--integrated]
 // --ask shows the one-time question; --stereo renders a stereo mix (dialogue-gated);
-// --integrated renders a stereo mix in Integrated mode.
+// --integrated renders a stereo mix in Integrated mode; --surround makes the mix 5.1;
+// --hot pushes the gain so the limiter works.
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include <cstdio>
@@ -15,12 +16,14 @@ int main (int argc, char** argv)
                                .getChildFile (argc > 1 ? argv[1] : "docs/screenshot.png");
 
     VOMeterProcessor processor;
-    bool showQuestion = false, integrated = false, stereoMix = false;
+    bool showQuestion = false, integrated = false, stereoMix = false, surround = false, hot = false;
     for (int i = 2; i < argc; ++i)
     {
         showQuestion = showQuestion || juce::String (argv[i]) == "--ask";
         integrated = integrated || juce::String (argv[i]) == "--integrated";
         stereoMix = stereoMix || juce::String (argv[i]) == "--stereo";
+        surround = surround || juce::String (argv[i]) == "--surround";
+        hot = hot || juce::String (argv[i]) == "--hot";
     }
 
     // Play 20 s of a voice-like demo signal (syllables and pauses) through it,
@@ -30,7 +33,9 @@ int main (int argc, char** argv)
         const double sr = 48000.0;
         // A mono narration track (as in Logic), with the stereo programme side chain;
         // or a stereo track measured integrated.
-        const auto mainSet = (integrated || stereoMix) ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
+        stereoMix = stereoMix || surround;
+        const auto mainSet = surround ? juce::AudioChannelSet::create5point1()
+                           : (integrated || stereoMix) ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
         juce::AudioProcessor::BusesLayout layout;
         layout.inputBuses.add (mainSet);
         layout.inputBuses.add (juce::AudioChannelSet::stereo());
@@ -75,6 +80,11 @@ int main (int argc, char** argv)
         processor.applySuggestedMatch();
         auto* trim = processor.apvts.getParameter (VOMeterProcessor::trimId);
         trim->setValueNotifyingHost (trim->convertTo0to1 (1.5f));   // a ride
+        if (hot)
+        {
+            auto* match = processor.apvts.getParameter (VOMeterProcessor::matchId);
+            match->setValueNotifyingHost (match->convertTo0to1 (20.0f));
+        }
         processor.requestMeterReset();
         play();
     }

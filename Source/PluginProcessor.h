@@ -78,6 +78,16 @@ public:
         std::atomic<float> outLoudness { std::numeric_limits<float>::quiet_NaN() };
         std::atomic<float> inLoudness  { std::numeric_limits<float>::quiet_NaN() };
         std::atomic<float> programmeLoudness { std::numeric_limits<float>::quiet_NaN() };
+
+        // Live meters (always running, playing or not). Each holds the highest
+        // value since the editor last took it, so short peaks aren't missed.
+        std::atomic<float> outPeak[vometer::kMaxChannels] {};   // output sample peak per channel, linear
+        std::atomic<float> grPeak { 0.0f };                      // limiter gain reduction, dB (positive)
+        std::atomic<int> numChannels { 2 };
+
+        // Editor: the highest value since the last call (then starts again).
+        float takeOutPeak (int ch) noexcept { return outPeak[ch].exchange (0.0f); }
+        float takeGrPeak() noexcept { return grPeak.exchange (0.0f); }
     };
     Readings readings;
 

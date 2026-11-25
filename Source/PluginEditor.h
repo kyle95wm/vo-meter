@@ -9,8 +9,10 @@
 //   header   - plugin name and version (no subtitle)
 //   loudness - big output LUFS (dialogue-gated, or integrated when mastering a mix),
 //              editable target (green when on target), programme loudness from
-//              the sidechain + Use (as target)
-//   stats    - max true peak, limiter gain reduction, LRA, speech share
+//              the sidechain + Use (as target; mono narration tracks only)
+//   stats    - max true peak, LRA, speech share
+//   meters   - strip down the right: output peak per channel (with the -2.5 dBTP
+//              ceiling and a peak hold) and the limiter's gain reduction
 //   gain     - Trim knob (your ride; alt-click = 0 dB), input loudness, Match gain,
 //              Match / Clear / Reset Meter
 //   pills    - Bypass
@@ -140,6 +142,7 @@ private:
     void timerCallback() override;
     void showPresetMenu();
     void setTargetFromText (const juce::String& text);
+    void drawMeters (juce::Graphics&);
 
     VOMeterProcessor& audioProcessor;
     VOMeterLookAndFeel lnf;
@@ -159,7 +162,11 @@ private:
 
     // Areas laid out in resized(), painted in paint().
     juce::Rectangle<int> loudPanel, bigReadout, targetCaption, statusArea, programmeArea, hintArea;
-    juce::Rectangle<int> statsPanel, trimPanel, trimCaption, inputArea, suggestArea;
+    juce::Rectangle<int> statsPanel, trimPanel, trimCaption, inputArea, suggestArea, meterPanel;
+
+    // Meter ballistics (dB): instant rise, then fall; the hold line waits, then falls.
+    float levelDb[vometer::kMaxChannels], holdDb[vometer::kMaxChannels], holdAge[vometer::kMaxChannels] {};
+    int meterChannels = 2;
 
     // Snapshot of the processor's readings, refreshed by the timer.
     float outLufs = NAN, inLufs = NAN, lra = NAN, tp = -INFINITY, gr = 0.0f, suggested = NAN;

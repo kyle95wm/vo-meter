@@ -239,6 +239,7 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         samplesSinceProgramme += n;
     const int delayLen = latency + 1;
     float maxGr = 0.0f;
+    float peaks[vometer::kMaxChannels] {};
 
     for (int i = 0; i < n; ++i)
     {
@@ -263,6 +264,7 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         {
             out[ch] = mix >= 1.0f ? wet[ch] : (mix <= 0.0f ? in[ch] : in[ch] + mix * (wet[ch] - in[ch]));
             mainBus.setSample (ch, i, out[ch]);
+            peaks[ch] = std::max (peaks[ch], std::abs (out[ch]));
         }
 
         meter.pushFrame (in, out, numCh, measuring);
@@ -285,6 +287,15 @@ void VOMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     readings.lra.store ((float) meter.loudnessRange());
     readings.maxTruePeak.store (meter.maxTruePeakDb());
     readings.limiterGr.store (maxGr);
+    auto raiseTo = [] (std::atomic<float>& a, float v)
+    {
+        float prev = a.load();
+        while (v > prev && ! a.compare_exchange_weak (prev, v)) {}
+    };
+    for (int ch = 0; ch < numCh; ++ch)
+        raiseTo (readings.outPeak[ch], peaks[ch]);
+    raiseTo (readings.grPeak, maxGr);
+    readings.numChannels.store (numCh);
     readings.speechSeconds.store ((float) meter.speechSeconds());
     readings.measuredSeconds.store ((float) meter.measuredSeconds());
     readings.measuring.store (measuring);
