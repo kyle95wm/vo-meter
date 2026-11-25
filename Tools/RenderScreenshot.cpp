@@ -27,7 +27,7 @@ int main (int argc, char** argv)
     }
 
     // Play 20 s of a voice-like demo signal (syllables and pauses) through it,
-    // set the target from the side chain, press Match, ride the trim a little,
+    // set the target from the side chain, press Match (trim left at 0 dB),
     // then play it again, so the shot shows real readings.
     {
         const double sr = 48000.0;
@@ -78,8 +78,6 @@ int main (int argc, char** argv)
         play();
         processor.useProgrammeAsTarget();
         processor.applySuggestedMatch();
-        auto* trim = processor.apvts.getParameter (VOMeterProcessor::trimId);
-        trim->setValueNotifyingHost (trim->convertTo0to1 (1.5f));   // a ride
         if (hot)
         {
             auto* match = processor.apvts.getParameter (VOMeterProcessor::matchId);

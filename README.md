@@ -12,7 +12,7 @@ plus an AU on macOS.
 ![VOMeter on a mono narration track](docs/screenshot.png)
 
 *A mono narration track: the dialogue-gated reading on target, the programme's reading from
-the side chain, a +1.5 dB trim ride on top of the Match gain, and the output and gain
+the side chain, the trim at 0 dB on top of the Match gain, and the output and gain
 reduction meters on the right.*
 
 ## Workflow
